@@ -1,0 +1,28 @@
+# Build stage
+FROM node:lts AS builder
+
+WORKDIR /app
+
+COPY webui/package.json webui/yarn.lock ./
+COPY webui/.yarnrc.yml ./
+COPY webui/.yarn ./.yarn
+
+# Install dependencies
+RUN yarn install
+
+# Copy source
+COPY webui .
+
+# Build
+RUN yarn run vite build --mode production
+
+# Final stage
+FROM nginx:stable-alpine
+
+# Copy built assets
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Expose port
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
