@@ -12,8 +12,8 @@ func (db *appdbimpl) SendMessage(message Message) (Message, error) {
 	message.Received = false
 	message.Read = false
 
-	res, err := db.c.Exec("INSERT INTO messages (conversation_id, sender_id, content, type, timestamp, received, read) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		message.ConversationID, message.SenderID, message.Content, message.Type, message.Timestamp, message.Received, message.Read)
+	res, err := db.c.Exec("INSERT INTO messages (conversation_id, sender_id, content, type, timestamp, received, read, reply_to_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		message.ConversationID, message.SenderID, message.Content, message.Type, message.Timestamp, message.Received, message.Read, message.ReplyToID, message.Photo)
 	if err != nil {
 		return Message{}, err
 	}
@@ -29,7 +29,8 @@ func (db *appdbimpl) SendMessage(message Message) (Message, error) {
 func (db *appdbimpl) ForwardMessage(conversationId uint64, forwardedMessageId uint64, senderId uint64) (Message, error) {
 	// Get original content
 	var content, msgType string
-	err := db.c.QueryRow("SELECT content, type FROM messages WHERE id = ?", forwardedMessageId).Scan(&content, &msgType)
+	var photo []byte
+	err := db.c.QueryRow("SELECT content, type, photo FROM messages WHERE id = ?", forwardedMessageId).Scan(&content, &msgType, &photo)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Message{}, errors.New("forwarded message not found")
@@ -41,8 +42,9 @@ func (db *appdbimpl) ForwardMessage(conversationId uint64, forwardedMessageId ui
 	newMessage := Message{
 		ConversationID: conversationId,
 		SenderID:       senderId,
-		Content:        content,
+		Content:        "(Forwarded) " + content,
 		Type:           msgType,
+		Photo:          photo,
 	}
 	return db.SendMessage(newMessage)
 }
@@ -65,6 +67,16 @@ func (db *appdbimpl) DeleteMessage(messageId uint64, userId uint64) error {
 
 // CommentMessage adds a reaction
 func (db *appdbimpl) CommentMessage(reaction Reaction) (Reaction, error) {
+	// Check if already reacted
+	var count int
+	err := db.c.QueryRow("SELECT COUNT(*) FROM reactions WHERE message_id = ? AND user_id = ?", reaction.MessageID, reaction.UserID).Scan(&count)
+	if err != nil {
+		return Reaction{}, err
+	}
+	if count > 0 {
+		return Reaction{}, errors.New("user already reacted to this message")
+	}
+
 	res, err := db.c.Exec("INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)",
 		reaction.MessageID, reaction.UserID, reaction.Emoji)
 	if err != nil {

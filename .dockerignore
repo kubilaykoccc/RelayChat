@@ -1,0 +1,10 @@
+webui/node_modules
+webui/dist
+webui/package-lock.json
+node_modules
+.git
+.DS_Store
+*.db
+*.db-journal
+*.db-wal
+tmp

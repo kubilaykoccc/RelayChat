@@ -3,15 +3,12 @@ FROM node:lts AS builder
 
 WORKDIR /app
 
-COPY webui/package.json webui/yarn.lock ./
-COPY webui/.yarnrc.yml ./
-COPY webui/.yarn ./.yarn
+# Copy source code and config files all at once
+# We utilize .dockerignore to exclude node_modules
+COPY webui .
 
 # Install dependencies
 RUN yarn install
-
-# Copy source
-COPY webui .
 
 # Build
 RUN yarn run vite build --mode production

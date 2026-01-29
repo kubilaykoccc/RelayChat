@@ -34,14 +34,19 @@ async function onSelectUser(user) {
     }
 }
 
-async function createGroup() {
-    const name = prompt("Enter group name:")
-    if (!name) return
-    
+const showGroupModal = ref(false)
+const newGroupName = ref('')
+
+function openGroupModal() {
+    showGroupModal.value = true
+    newGroupName.value = ''
+}
+
+async function doCreateGroup() {
+    if (!newGroupName.value) return
+    showGroupModal.value = false
     try {
-        const response = await axios.post('/conversations', {
-            name: name
-        })
+        const response = await axios.post('/conversations', { name: newGroupName.value })
         selectedConversationId.value = response.data.id
         refreshList()
     } catch (e) {
@@ -51,7 +56,7 @@ async function createGroup() {
 
 function refreshList() {
     if (conversationListRef.value) {
-        conversationListRef.value.loadConversations() // Expose this method in ConversationList?
+        conversationListRef.value.loadConversations(true)
         // Need to defineExpose in ConversationList
     }
 }
@@ -66,7 +71,7 @@ function refreshList() {
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="fs-5 fw-bold text-primary">WASAText</span>
                     </div>
-                    <button class="btn btn-primary w-100 mb-3 d-flex align-items-center justify-content-center gap-2" @click="createGroup" title="New Group">
+                    <button class="btn btn-primary w-100 mb-3 d-flex align-items-center justify-content-center gap-2" @click="openGroupModal" title="New Group">
                         <span class="fw-bold fs-5">+</span> New Group
                     </button>
                     
@@ -96,7 +101,7 @@ function refreshList() {
         </nav>
 
         <!-- Main Content -->
-        <main class="col-md-8 ms-sm-auto col-lg-9 h-100 bg-white">
+        <main class="col-md-8 ms-sm-auto col-lg-9 h-100 bg-white position-relative">
             <div class="h-100" v-if="selectedConversationId">
                 <ChatWindow 
                     :conversationId="selectedConversationId" 
@@ -109,11 +114,38 @@ function refreshList() {
                     <p>Select a chat from the sidebar to start messaging.</p>
                 </div>
             </div>
+
+
+            <div v-if="showGroupModal" class="modal-overlay d-flex justify-content-center align-items-start pt-5">
+                <div class="card shadow-lg" style="width: 300px; z-index: 2000;">
+                    <div class="card-header bg-primary text-white fw-bold">Create New Group</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Group Name</label>
+                            <input v-model="newGroupName" type="text" class="form-control" placeholder="e.g. Formatting Team" @keyup.enter="doCreateGroup" autofocus>
+                        </div>
+                        <div class="d-flex justify-content-end gap-2">
+                            <button class="btn btn-secondary btn-sm" @click="showGroupModal = false">Cancel</button>
+                            <button class="btn btn-primary btn-sm" @click="doCreateGroup" :disabled="!newGroupName">Create</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 </template>
 
 <style scoped>
+.modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1050;
+    /* backdrop-filter: blur(2px); <-- REMOVED FOR VM PERFORMANCE */
+}
 .sidebar {
     position: fixed;
     top: 48px; /* Height of header if exists, or just absolute */

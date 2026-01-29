@@ -1,18 +1,19 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import axios from '../services/axios.js'
 
 const conversations = ref([])
 const loading = ref(false)
 const error = ref(null)
+let pollController = null
 
 const emit = defineEmits(['select-conversation'])
 
-async function loadConversations() {
-    loading.value = true
+async function loadConversations(isBackground = false) {
+    if (!isBackground) loading.value = true
     error.value = null
     try {
-        const response = await axios.get('/conversations')
+        const response = await axios.get('/conversations', { params: { _t: Date.now() } })
         // Sort by last message timestamp (descending)
         conversations.value = response.data.sort((a, b) => {
             const tA = a.lastMessage ? new Date(a.lastMessage.timestamp) : new Date(0)
@@ -20,9 +21,10 @@ async function loadConversations() {
             return tB - tA
         })
     } catch (e) {
-        error.value = e.toString()
+        if (!isBackground) error.value = e.toString()
+        else console.error("Poll error", e)
     } finally {
-        loading.value = false
+        if (!isBackground) loading.value = false
     }
 }
 
@@ -48,8 +50,21 @@ function getPhotoSrc(conv) {
     return null
 }
 
-onMounted(() => {
+function startPolling() {
     loadConversations()
+    pollController = setInterval(() => loadConversations(true), 2000)
+}
+
+function stopPolling() {
+    if (pollController) clearInterval(pollController)
+}
+
+onMounted(() => {
+    startPolling()
+})
+
+onUnmounted(() => {
+    stopPolling()
 })
 
 defineExpose({ loadConversations })

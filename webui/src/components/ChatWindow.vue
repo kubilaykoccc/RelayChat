@@ -24,36 +24,87 @@ const messageToForward = ref(null)
 const forwardTargets = ref([]) // List of conversations to forward to
 const groupPhotoInput = ref(null)
 
-// Poll interval
-let pollController = null
+const replyingTo = ref(null)
+const selectedImage = ref(null)
+const chatImageInput = ref(null)
 
-async function loadData() {
+const pollTimeout = ref(null)
+const isPolling = ref(false)
+
+async function loadData(isInitial = false) {
     if (!props.conversationId) return
     try {
-        const response = await axios.get(`/conversations/${props.conversationId}`)
+        const response = await axios.get(`/conversations/${props.conversationId}`, { params: { _t: Date.now() } })
+        
+        const newMessages = response.data.messages
+        if (newMessages.length > messages.value.length) {
+            scrollToBottom()
+        }
+        
         conversation.value = response.data
-        messages.value = response.data.messages
-        scrollToBottom()
+        messages.value = newMessages
     } catch (e) {
         console.error("Error loading conversation:", e)
+    } finally {
+        if (isPolling.value) {
+            pollTimeout.value = setTimeout(() => loadData(false), 2000)
+        }
     }
 }
 
 async function sendMessage() {
-    if (!newMessage.value.trim()) return
+    if (!newMessage.value.trim() && !selectedImage.value) return
     sending.value = true
     try {
-        await axios.post(`/conversations/${props.conversationId}/messages`, {
-            type: 'text',
-            content: newMessage.value
+        let payload
+        let isMultipart = false
+
+        if (selectedImage.value) {
+            isMultipart = true
+            payload = new FormData()
+            payload.append('content', newMessage.value)
+            payload.append('type', 'image')
+            payload.append('image', selectedImage.value)
+            if (replyingTo.value) {
+                payload.append('replyToId', replyingTo.value.id)
+            }
+        } else {
+            payload = {
+                type: 'text',
+                content: newMessage.value,
+                replyToId: replyingTo.value ? replyingTo.value.id : 0
+            }
+        }
+
+        await axios.post(`/conversations/${props.conversationId}/messages`, payload, {
+            headers: isMultipart ? { 'Content-Type': 'multipart/form-data' } : {}
         })
+
         newMessage.value = ''
+        selectedImage.value = null
+        replyingTo.value = null
+        
         await loadData()
+        scrollToBottom() 
     } catch (e) {
         alert("Error sending message: " + e.toString())
     } finally {
         sending.value = false
     }
+}
+
+function selectImage(event) {
+    const file = event.target.files[0]
+    if (file) selectedImage.value = file
+}
+function clearImage() {
+    selectedImage.value = null
+}
+function setReply(msg) {
+    replyingTo.value = msg
+}
+function clearReply() {
+    replyingTo.value = null
 }
 
 async function deleteMessage(id) {
@@ -67,7 +118,6 @@ async function deleteMessage(id) {
 }
 
 // Group Management
-// Defines emits
 const emit = defineEmits(['conversation-updated'])
 
 async function addMember(user) {
@@ -86,7 +136,7 @@ async function leaveGroup() {
     if (!confirm("Are you sure you want to leave this group?")) return
     try {
         await axios.delete(`/conversations/${props.conversationId}/members/me`)
-        window.location.reload() // Or emit and close? Reload is safer for now but harsh.
+        window.location.reload()
     } catch (e) {
         alert("Error leaving group: " + e.toString())
     }
@@ -129,7 +179,6 @@ async function updateGroupPhoto(event) {
     } catch (e) {
         alert("Error updating photo: " + e.toString())
     } finally {
-        // Reset input
         event.target.value = ''
     }
 }
@@ -188,13 +237,23 @@ function scrollToBottom() {
 }
 
 function startPolling() {
-    loadData()
-    pollController = setInterval(loadData, 3000)
+    if (isPolling.value) return
+    isPolling.value = true
+    loadData(true)
 }
 
 function stopPolling() {
-    if (pollController) clearInterval(pollController)
+    isPolling.value = false
+    if (pollTimeout.value) {
+        clearTimeout(pollTimeout.value)
+        pollTimeout.value = null
+    }
 }
+
+// Notify parent to refresh list
+watch(conversation, () => {
+   emit('conversation-updated')
+})
 
 watch(() => props.conversationId, (newId) => {
     stopPolling()
@@ -229,7 +288,7 @@ onUnmounted(() => stopPolling())
                     <h5 class="mb-0">
                         {{ conversation.name }}
                     </h5>
-                <small class="text-muted" v-if="conversation.isGroup">
+                <small class="text-muted" v-if="conversation.isGroup" :title="conversation.members.map(m => m.username).join(', ')">
                     {{ conversation.members.length }} members
                 </small>
             </div>
@@ -284,7 +343,19 @@ onUnmounted(() => stopPolling())
                              {{ conversation.members.find(m => m.id == msg.senderId)?.username || 'Unknown' }}
                         </div>
 
+                        <!-- Reply Snippet -->
+                        <div v-if="msg.replyTo" class="mb-2 p-2 rounded border-start border-4 border-primary bg-white bg-opacity-75 small">
+                            <div class="fw-bold">{{ msg.replyTo.senderId == localStorageProp ? 'You' : conversation.members.find(m => m.id == msg.replyTo.senderId)?.username || 'Unknown' }}</div>
+                            <div class="text-truncate">{{ msg.replyTo.content }}</div>
+                        </div>
+
+                        <!-- Message Content -->
                         <p class="mb-1">{{ msg.content }}</p>
+
+                        <!-- Attached Image -->
+                        <div v-if="msg.photo" class="mt-2">
+                             <img :src="`data:image/jpeg;base64,${msg.photo}`" class="img-fluid rounded" style="max-height: 200px;">
+                        </div>
                         
                         <!-- Reactions -->
                         <div v-if="msg.reactions && msg.reactions.length > 0" class="d-flex gap-1 flex-wrap mt-2">
@@ -294,7 +365,7 @@ onUnmounted(() => stopPolling())
                                 class="badge bg-secondary rounded-pill cursor-pointer"
                                 :class="{ 'bg-success': reaction.userId == localStorageProp }"
                                 @click="reaction.userId == localStorageProp ? removeReaction(msg.id, reaction.id) : null"
-                                title="Click to remove your reaction"
+                                :title="'Reacted by: ' + (reaction.userId == localStorageProp ? 'You' : (conversation.members.find(m => m.id == reaction.userId)?.username || 'Unknown'))"
                              >
                                 {{ reaction.emoji }}
                              </span>
@@ -329,6 +400,15 @@ onUnmounted(() => stopPolling())
                                     </ul>
                                 </div>
                                 
+                                <!-- Reply -->
+                                <button 
+                                    class="btn btn-sm p-0 opacity-50 hover-opacity-100 text-reset" 
+                                    @click="setReply(msg)"
+                                    title="Reply"
+                                >
+                                    ↩
+                                </button>
+                                
                                 <!-- Forward -->
                                 <button 
                                     class="btn btn-sm p-0 opacity-50 hover-opacity-100 text-reset" 
@@ -341,7 +421,7 @@ onUnmounted(() => stopPolling())
                                 <!-- Delete -->
                                 <button 
                                     v-if="msg.senderId == localStorageProp" 
-                                    class="btn btn-sm p-0 opacity-50 hover-opacity-100 text-reset" 
+                                    class="btn btn-sm btn-link text-danger text-decoration-none p-0" 
                                     @click="deleteMessage(msg.id)"
                                     title="Delete"
                                 >
@@ -356,7 +436,26 @@ onUnmounted(() => stopPolling())
 
         <!-- Input Area -->
         <div class="p-3 border-top bg-light">
+             <!-- Context Banner (Reply / Image) -->
+             <div v-if="replyingTo" class="mb-2 p-2 bg-white rounded border-start border-4 border-primary d-flex justify-content-between align-items-center small">
+                <div>
+                    <strong>Replying to {{ replyingTo.senderId == localStorageProp ? 'You' : conversation.members.find(m => m.id == replyingTo.senderId)?.username }}:</strong>
+                    <span class="text-muted ms-1 text-truncate d-inline-block" style="max-width: 200px;">{{ replyingTo.content }}</span>
+                </div>
+                <button type="button" class="btn-close btn-close-white small" @click="clearReply" aria-label="Close"></button>
+             </div>
+             <div v-if="selectedImage" class="mb-2 p-2 bg-white rounded d-flex justify-content-between align-items-center">
+                <span class="small text-muted">Image selected: {{ selectedImage.name }}</span>
+                <button type="button" class="btn-close small" @click="clearImage" aria-label="Close"></button>
+             </div>
+
             <form @submit.prevent="sendMessage" class="d-flex gap-2">
+                 <!-- Image Upload -->
+                <input type="file" ref="chatImageInput" class="d-none" accept="image/png, image/jpeg" @change="selectImage">
+                <button type="button" class="btn btn-outline-secondary" @click="chatImageInput.click()" title="Attach Image">
+                    📎
+                </button>
+                
                 <input 
                     type="text" 
                     class="form-control" 
@@ -364,7 +463,7 @@ onUnmounted(() => stopPolling())
                     placeholder="Type a message..." 
                     :disabled="sending"
                 >
-                <button type="submit" class="btn btn-primary" :disabled="sending || !newMessage.trim()">
+                <button type="submit" class="btn btn-primary" :disabled="sending || (!newMessage.trim() && !selectedImage)">
                     Send
                 </button>
             </form>

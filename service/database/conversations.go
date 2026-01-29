@@ -102,39 +102,37 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 	// But we don't know the IDs yet.
 	// So we fetch, then update? Or update broadly?
 	// Broad update on membership:
-	_, _ = db.c.Exec("UPDATE conversation_members SET last_delivered = ? WHERE user_id = ?", time.Now(), userId)
-
-	// Trigger status update for messages in these conversations
-	// We can do this efficiently by looking for pending messages.
-	// For every message that is not received (received=0) AND sender != userId:
-	// Check if ALL members of that conv have last_delivered >= msg.timestamp.
-	// Because checking ONE BY ONE is slow, we might use a complex query or just do it for active conversations.
-	// Given the scale, let's try a query updates approach.
-
-	// SQLite query to update 'received'
-	updateReceived := `
-        UPDATE messages
-        SET received = 1
-        WHERE received = 0 
-        AND sender_id != ?
-        AND (
-            SELECT COUNT(*) 
-            FROM conversation_members cm 
-            WHERE cm.conversation_id = messages.conversation_id 
-            AND cm.user_id != messages.sender_id
-            AND cm.last_delivered < messages.timestamp
-        ) = 0
-    `
-	// Explanation: Set received=1 if there are NO members (recipients) who have last_delivered < msg.timestamp.
-	// i.e. ALL recipients have last_delivered >= msg.timestamp.
-	// Using '<' catches anyone who hasn't delivered yet.
-
-	_, err := db.c.Exec(updateReceived, userId)
-	if err != nil {
-		// Log error but continue?
-		fmt.Println("Error updating received status:", err)
+	// Optimization: Only update last_delivered if it's been more than 10 seconds
+	// If we don't update the timestamp, we also don't need to check for status updates,
+	// because "received" status logic relies on this timestamp moving forward.
+	// This makes 9/10 requests Read-Only, which never locks the DB.
+	res, err := db.c.Exec("UPDATE conversation_members SET last_delivered = ? WHERE user_id = ? AND last_delivered < ?", time.Now(), userId, time.Now().Add(-10*time.Second))
+	if err == nil {
+		rows, _ := res.RowsAffected()
+		if rows > 0 {
+			// Only run the heavy status updates if we actually touched the timestamp
+			updateReceived := `
+				UPDATE messages
+				SET received = 1
+				WHERE received = 0
+				AND sender_id != ?
+				AND (
+					SELECT COUNT(*)
+					FROM conversation_members cm
+					WHERE cm.conversation_id = messages.conversation_id
+					AND cm.user_id != messages.sender_id
+					AND cm.last_delivered < messages.timestamp
+				) = 0
+			`
+			_, _ = db.c.Exec(updateReceived, userId)
+		}
 	}
 
+	// Query to fetch conversations with dynamic naming for 1-to-1
+	// We join with conversation_members again (cm2) to find the OTHER user in 1-to-1 chats (where is_group=0)
+	// Then we join with users (u) to get their username and photo.
+	// If is_group=1, we use c.name and c.photo.
+	// If is_group=0, we use u.username and u.photo.
 	// Query to fetch conversations with dynamic naming for 1-to-1
 	// We join with conversation_members again (cm2) to find the OTHER user in 1-to-1 chats (where is_group=0)
 	// Then we join with users (u) to get their username and photo.
@@ -154,7 +152,6 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
         LEFT JOIN users u ON cm2.user_id = u.id
 		WHERE cm.user_id = ?
 	`
-	// We pass userId twice: first for cm2 check (!= userId), second for main WHERE clause (cm.user_id = userId)
 	rows, err := db.c.Query(query, userId, userId)
 	if err != nil {
 		return nil, fmt.Errorf("error getting conversations: %w", err)
@@ -162,6 +159,10 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 	defer rows.Close()
 
 	var results []ConversationUnread
+	// Map to quickly assign auxiliary data
+	convMap := make(map[uint64]*ConversationUnread)
+	var convIDs []interface{} // built for IN clause
+
 	for rows.Next() {
 		var c ConversationUnread
 		var lastSeen time.Time
@@ -178,36 +179,82 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 			c.OwnerID = uint64(ownerId.Int64)
 		}
 
-		// Get Last Message
-		var m Message
-		var mTimestamp time.Time
-		msgQuery := `
-			SELECT id, conversation_id, sender_id, content, type, timestamp, received, read
-			FROM messages
-			WHERE conversation_id = ?
-			ORDER BY timestamp DESC
-			LIMIT 1
-		`
-		err = db.c.QueryRow(msgQuery, c.ID).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Content, &m.Type, &mTimestamp, &m.Received, &m.Read)
-		if err == nil {
-			m.Timestamp = mTimestamp
-			c.LastMessage = &m
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("error getting last message: %w", err)
-		}
-
-		// Calculate unread count (messages not read by ME)
-		countQuery := `SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND sender_id != ? AND read = 0`
-		err = db.c.QueryRow(countQuery, c.ID, userId).Scan(&c.UnreadCount)
-		if err != nil {
-			return nil, fmt.Errorf("error counting unread: %w", err)
-		}
-
 		results = append(results, c)
+		// Store pointer to update inplace later
+		// Note: results[len(results)-1] is unsafe if we append?
+		// Actually, slices hold values. We need to update the slice elements.
+		// Better: store index in map? Or just iterate slice later?
+		// We'll iterate slice later and use a map for lookup of aux data.
+		convIDs = append(convIDs, c.ID)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	// Pointers map for easy lookup
+	for i := range results {
+		convMap[results[i].ID] = &results[i]
 	}
+
+	if len(results) > 0 {
+		// 1. Batch Unread Counts
+		// Build placeholders based on length
+		// This is "cheating" string building but safe for ints/ids typically or utilize a helper
+		placeholders := ""
+		for i := 0; i < len(convIDs); i++ {
+			if i > 0 {
+				placeholders += ","
+			}
+			placeholders += "?"
+		}
+
+		// Unread Count Query
+		// args: userId, then convIDs...
+		ucQuery := fmt.Sprintf(`
+			SELECT conversation_id, COUNT(*) 
+			FROM messages 
+			WHERE sender_id != ? AND read = 0 AND conversation_id IN (%s)
+			GROUP BY conversation_id
+		`, placeholders)
+
+		ucArgs := append([]interface{}{userId}, convIDs...)
+		ucRows, err := db.c.Query(ucQuery, ucArgs...)
+		if err == nil {
+			defer ucRows.Close()
+			for ucRows.Next() {
+				var cid uint64
+				var count int
+				if err := ucRows.Scan(&cid, &count); err == nil {
+					if c, ok := convMap[cid]; ok {
+						c.UnreadCount = count
+					}
+				}
+			}
+		}
+
+		// 2. Batch Last Message
+		// Max ID per conversation
+		lmQuery := fmt.Sprintf(`
+			SELECT m.id, m.conversation_id, m.sender_id, m.content, m.type, m.timestamp, m.received, m.read
+			FROM messages m
+			WHERE m.id IN (
+				SELECT MAX(id) FROM messages WHERE conversation_id IN (%s) GROUP BY conversation_id
+			)
+		`, placeholders)
+
+		// args: convIDs...
+		lmRows, err := db.c.Query(lmQuery, convIDs...)
+		if err == nil {
+			defer lmRows.Close()
+			for lmRows.Next() {
+				var m Message
+				var ts time.Time
+				if err := lmRows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Content, &m.Type, &ts, &m.Received, &m.Read); err == nil {
+					m.Timestamp = ts
+					if c, ok := convMap[m.ConversationID]; ok {
+						c.LastMessage = &m
+					}
+				}
+			}
+		}
+	}
+
 	return results, nil
 }
 
@@ -223,43 +270,49 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		return ConversationDetails{}, errors.New("access denied or conversation not found")
 	}
 
-	// Update last_seen
-	_, _ = db.c.Exec("UPDATE conversation_members SET last_seen = ? WHERE conversation_id = ? AND user_id = ?", time.Now(), conversationId, userId)
+	// Optimization: Debounce 'last_seen' update. Only update if older than 10s.
+	// This helps reducing write lock contention.
+	res, err := db.c.Exec("UPDATE conversation_members SET last_seen = ? WHERE conversation_id = ? AND user_id = ? AND last_seen < ?", time.Now(), conversationId, userId, time.Now().Add(-10*time.Second))
+	if err == nil {
+		rows, _ := res.RowsAffected()
+		if rows > 0 {
+			// Also update last_delivered if we updated last_seen
+			_, _ = db.c.Exec("UPDATE conversation_members SET last_delivered = ? WHERE conversation_id = ? AND user_id = ?", time.Now(), conversationId, userId)
+		}
+	}
 
-	// Update last_delivered as well, since opening a conversation implies delivery
-	_, _ = db.c.Exec("UPDATE conversation_members SET last_delivered = ? WHERE conversation_id = ? AND user_id = ?", time.Now(), conversationId, userId)
-
-	// Strict Read Logic:
-	// Update 'read' to 1 Only if ALL recipients have last_seen >= msg.timestamp.
+	// Always attempt to mark messages as read when fetching conversation details.
+	// We do this separately from the debounce logic to ensure UI updates (badges clearing) happen immediately.
+	// Strict Read Logic: Update 'read' to 1 Only if ALL recipients have seen it.
 	updateRead := `
-        UPDATE messages
-        SET read = 1
-        WHERE conversation_id = ?
-        AND read = 0
-        AND sender_id != ?
-        AND (
-            SELECT COUNT(*)
-            FROM conversation_members cm
-            WHERE cm.conversation_id = messages.conversation_id
-            AND cm.user_id != messages.sender_id
-            AND cm.last_seen < messages.timestamp
-        ) = 0
-    `
+		UPDATE messages
+		SET read = 1
+		WHERE conversation_id = ?
+		AND read = 0
+		AND sender_id != ?
+		AND (
+			SELECT COUNT(*)
+			FROM conversation_members cm
+			WHERE cm.conversation_id = messages.conversation_id
+			AND cm.user_id != messages.sender_id
+			AND cm.last_seen < messages.timestamp
+		) = 0
+	`
 	// Also trigger updateReceived for this conversation to be safe
 	updateReceived := `
-        UPDATE messages
-        SET received = 1
-        WHERE conversation_id = ?
-        AND received = 0
-        AND sender_id != ?
-        AND (
-            SELECT COUNT(*) 
-            FROM conversation_members cm 
-            WHERE cm.conversation_id = messages.conversation_id 
-            AND cm.user_id != messages.sender_id
-            AND cm.last_delivered < messages.timestamp
-        ) = 0
-    `
+		UPDATE messages
+		SET received = 1
+		WHERE conversation_id = ?
+		AND received = 0
+		AND sender_id != ?
+		AND (
+			SELECT COUNT(*)
+			FROM conversation_members cm
+			WHERE cm.conversation_id = messages.conversation_id
+			AND cm.user_id != messages.sender_id
+			AND cm.last_delivered < messages.timestamp
+		) = 0
+	`
 	_, _ = db.c.Exec(updateReceived, conversationId, userId)
 	_, _ = db.c.Exec(updateRead, conversationId, userId)
 
@@ -311,33 +364,89 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		}
 	}
 
-	// Fetch Messages
-	msgRows, err := db.c.Query("SELECT id, conversation_id, sender_id, content, type, timestamp, received, read FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC", conversationId)
+	// Fetch Messages first (without reactions inside loop)
+	query := `
+		SELECT 
+			m.id, m.conversation_id, m.sender_id, m.content, m.type, m.timestamp, m.received, m.read, m.photo, m.reply_to_id,
+			r.id, r.sender_id, r.content, r.type
+		FROM messages m
+		LEFT JOIN messages r ON m.reply_to_id = r.id
+		WHERE m.conversation_id = ? 
+		ORDER BY m.timestamp ASC
+	`
+	msgRows, err := db.c.Query(query, conversationId)
 	if err != nil {
 		return ConversationDetails{}, err
 	}
 	defer msgRows.Close()
+
+	var messagesList []Message
+	// Map to keep track of message indices to attach reactions later
+	msgMap := make(map[uint64]*Message)
+
 	for msgRows.Next() {
 		var m Message
 		var ts time.Time
-		if err := msgRows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Content, &m.Type, &ts, &m.Received, &m.Read); err != nil {
+		var replyID sql.NullInt64
+		var rID sql.NullInt64
+		var rSenderID sql.NullInt64
+		var rContent sql.NullString
+		var rType sql.NullString
+
+		if err := msgRows.Scan(
+			&m.ID, &m.ConversationID, &m.SenderID, &m.Content, &m.Type, &ts, &m.Received, &m.Read, &m.Photo, &replyID,
+			&rID, &rSenderID, &rContent, &rType,
+		); err != nil {
 			return ConversationDetails{}, err
 		}
 		m.Timestamp = ts
-
-		// Fetch reactions
-		rRows, err := db.c.Query("SELECT id, message_id, user_id, emoji FROM reactions WHERE message_id = ?", m.ID)
-		if err == nil {
-			for rRows.Next() {
-				var r Reaction
-				rRows.Scan(&r.ID, &r.MessageID, &r.UserID, &r.Emoji)
-				m.Reactions = append(m.Reactions, r)
-			}
-			rRows.Close()
+		if replyID.Valid {
+			rid := uint64(replyID.Int64)
+			m.ReplyToID = &rid
 		}
 
-		c.Messages = append(c.Messages, m)
+		// Populate ReplyTo if exists
+		if rID.Valid {
+			reply := Message{
+				ID:       uint64(rID.Int64),
+				SenderID: uint64(rSenderID.Int64),
+				Content:  rContent.String,
+				Type:     rType.String,
+			}
+			m.ReplyTo = &reply
+		}
+
+		m.Reactions = []Reaction{} // Initialize empty
+		messagesList = append(messagesList, m)
 	}
+
+	// Create pointers map for second pass (reactions)
+	for i := range messagesList {
+		msgMap[messagesList[i].ID] = &messagesList[i]
+	}
+
+	// Efficient Batch Fetch Reactions
+	// We fetch all reactions for messages in this conversation
+	reactionQuery := `
+		SELECT r.id, r.message_id, r.user_id, r.emoji
+		FROM reactions r
+		JOIN messages m ON r.message_id = m.id
+		WHERE m.conversation_id = ?
+	`
+	rRows, err := db.c.Query(reactionQuery, conversationId)
+	if err == nil {
+		defer rRows.Close()
+		for rRows.Next() {
+			var r Reaction
+			if err := rRows.Scan(&r.ID, &r.MessageID, &r.UserID, &r.Emoji); err == nil {
+				if msg, exists := msgMap[r.MessageID]; exists {
+					msg.Reactions = append(msg.Reactions, r)
+				}
+			}
+		}
+	}
+
+	c.Messages = messagesList
 
 	return c, nil
 }

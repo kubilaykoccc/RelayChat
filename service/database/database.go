@@ -83,6 +83,11 @@ func New(db *sql.DB) (AppDatabase, error) {
 		return nil, fmt.Errorf("error enabling foreign keys: %w", err)
 	}
 
+	// Set busy_timeout to 5000ms to avoid "database is locked" errors during concurrent updates
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		return nil, fmt.Errorf("error setting busy_timeout: %w", err)
+	}
+
 	// Create tables
 	tables := []string{
 		`CREATE TABLE IF NOT EXISTS users (
@@ -115,8 +120,11 @@ func New(db *sql.DB) (AppDatabase, error) {
 			timestamp DATETIME NOT NULL,
 			received BOOLEAN DEFAULT FALSE,
 			read BOOLEAN DEFAULT FALSE,
+			reply_to_id INTEGER,
+			photo BLOB,
 			FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-			FOREIGN KEY (sender_id) REFERENCES users(id)
+			FOREIGN KEY (sender_id) REFERENCES users(id),
+			FOREIGN KEY (reply_to_id) REFERENCES messages(id) ON DELETE SET NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS reactions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +142,19 @@ func New(db *sql.DB) (AppDatabase, error) {
 		}
 	}
 
+	// Performance Indexes
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_messages_conv_ts ON messages(conversation_id, timestamp DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_reactions_msg_id ON reactions(message_id);",
+		"CREATE INDEX IF NOT EXISTS idx_members_user_id ON conversation_members(user_id);",
+		"CREATE INDEX IF NOT EXISTS idx_members_conv_user ON conversation_members(conversation_id, user_id);",
+	}
+	for _, stmt := range indexes {
+		if _, err := db.Exec(stmt); err != nil {
+			return nil, fmt.Errorf("error creating index: %w", err)
+		}
+	}
+
 	// Migration: Add last_delivered to conversation_members if not exists
 	// We try to add it, if it fails (because it exists), we ignore.
 	// Use a separate check or just try ADD COLUMN. SQLite supports ADD COLUMN.
@@ -145,6 +166,10 @@ func New(db *sql.DB) (AppDatabase, error) {
 		// Let's just try-catch standard approach.
 	}
 
+	// Migration: Add reply_to_id and photo to messages if not exist
+	_, _ = db.Exec("ALTER TABLE messages ADD COLUMN reply_to_id INTEGER REFERENCES messages(id) ON DELETE SET NULL")
+	_, _ = db.Exec("ALTER TABLE messages ADD COLUMN photo BLOB")
+
 	return &appdbimpl{
 		c: db,
 	}, nil
@@ -153,3 +178,4 @@ func New(db *sql.DB) (AppDatabase, error) {
 func (db *appdbimpl) Ping() error {
 	return db.c.Ping()
 }
+

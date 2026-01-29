@@ -66,6 +66,8 @@ type MessageResponse struct {
 	Received       bool               `json:"received"`
 	Read           bool               `json:"read"`
 	Reactions      []ReactionResponse `json:"reactions"`
+	ReplyTo        *MessageResponse   `json:"replyTo,omitempty"`
+	Photo          []byte             `json:"photo,omitempty"`
 }
 
 func FromDatabaseMessage(m database.Message) MessageResponse {
@@ -73,7 +75,7 @@ func FromDatabaseMessage(m database.Message) MessageResponse {
 	for i, r := range m.Reactions {
 		reactions[i] = FromDatabaseReaction(r)
 	}
-	return MessageResponse{
+	msg := MessageResponse{
 		ID:             m.ID,
 		ConversationID: m.ConversationID,
 		SenderID:       m.SenderID,
@@ -83,7 +85,14 @@ func FromDatabaseMessage(m database.Message) MessageResponse {
 		Received:       m.Received,
 		Read:           m.Read,
 		Reactions:      reactions,
+		Photo:          m.Photo,
 	}
+
+	if m.ReplyTo != nil {
+		reply := FromDatabaseMessage(*m.ReplyTo)
+		msg.ReplyTo = &reply
+	}
+	return msg
 }
 
 // ReactionResponse
@@ -123,7 +132,8 @@ type SendMessageRequest struct {
 	// NewPhotoMessage: { type: "image", image: binary }
 
 	// For JSON unmarshalling of text message:
-	Text string `json:"text,omitempty"`
+	Text      string `json:"text,omitempty"`
+	ReplyToID uint64 `json:"replyToId,omitempty"`
 }
 
 // ForwardMessageRequest

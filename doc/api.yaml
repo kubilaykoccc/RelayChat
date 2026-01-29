@@ -70,8 +70,16 @@ paths:
           description: Username updated successfully
         '400':
           description: Invalid username
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: Username already in use
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /users/me/photo:
     put:
@@ -137,7 +145,6 @@ paths:
               schema:
                 type: array
                 items:
-                items:
                   $ref: '#/components/schemas/ConversationUnread'
 
     post:
@@ -170,6 +177,12 @@ paths:
                 $ref: '#/components/schemas/ConversationDetails'
 
   /conversations/{conversationId}:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
     get:
       tags:
         - conversations
@@ -178,12 +191,6 @@ paths:
       operationId: getConversation
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: Conversation details and messages
@@ -193,8 +200,18 @@ paths:
                 $ref: '#/components/schemas/ConversationDetails'
         '404':
           description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /conversations/{conversationId}/name:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
     put:
       tags:
         - conversations
@@ -202,12 +219,6 @@ paths:
       operationId: setGroupName
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
@@ -225,8 +236,18 @@ paths:
           description: Group name updated
         '403':
           description: Not allowed (not a group or not a member)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /conversations/{conversationId}/photo:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
     put:
       tags:
         - conversations
@@ -234,12 +255,6 @@ paths:
       operationId: setGroupPhoto
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
@@ -256,8 +271,23 @@ paths:
           description: Group photo updated
         '403':
           description: Not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /conversations/{conversationId}/members/{userId}:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
     put:
       tags:
         - conversations
@@ -265,26 +295,29 @@ paths:
       operationId: addToGroup
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: userId
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '204':
           description: User added to group
         '403':
           description: Not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: User or conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /conversations/{conversationId}/members/me:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
     delete:
       tags:
         - conversations
@@ -292,17 +325,17 @@ paths:
       operationId: leaveGroup
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '204':
           description: Left group successfully
 
   /conversations/{conversationId}/messages:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
     post:
       tags:
         - messages
@@ -310,12 +343,6 @@ paths:
       operationId: sendMessage
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
@@ -333,6 +360,12 @@ paths:
                 $ref: '#/components/schemas/Message'
 
   /conversations/{conversationId}/messages/forwarded:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
     post:
       tags:
           - messages
@@ -340,12 +373,6 @@ paths:
       operationId: forwardMessage
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
@@ -366,6 +393,17 @@ paths:
                 $ref: '#/components/schemas/Message'
 
   /conversations/{conversationId}/messages/{messageId}:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
     delete:
       tags:
         - messages
@@ -373,22 +411,22 @@ paths:
       operationId: deleteMessage
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: messageId
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '204':
           description: Message deleted
 
   /conversations/{conversationId}/messages/{messageId}/reactions:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
     post:
       tags:
         - reactions
@@ -396,17 +434,6 @@ paths:
       operationId: commentMessage
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: messageId
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
@@ -427,6 +454,22 @@ paths:
                 $ref: '#/components/schemas/Reaction'
 
   /conversations/{conversationId}/messages/{messageId}/reactions/{reactionId}:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: reactionId
+        in: path
+        required: true
+        schema:
+          type: string
     delete:
       tags:
         - reactions
@@ -434,22 +477,6 @@ paths:
       operationId: uncommentMessage
       security:
         - BearerAuth: []
-      parameters:
-        - name: conversationId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: messageId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: reactionId
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '204':
           description: Reaction removed
@@ -463,109 +490,188 @@ components:
   schemas:
     User:
       type: object
+      description: API User model
       properties:
         id:
           type: integer
           format: int64
+          description: User unique identifier
         username:
           type: string
+          description: Unique username
+          minLength: 3
+          maxLength: 16
+          pattern: "^[a-zA-Z0-9_]{3,16}$"
         photo:
           type: string
           format: byte
           nullable: true
+          description: Base64 encoded profile photo (optional)
+      required:
+        - username
+
+
+    Error:
+      type: object
+      description: Standard error response
+      properties:
+        code:
+          type: string
+          description: Error code identifier
+          minLength: 1
+          maxLength: 50
+          pattern: "^[A-Z_]{1,50}$"
+        message:
+          type: string
+          description: Human readable error message
+          minLength: 1
+          maxLength: 200
+          pattern: "^.{1,200}$"
 
     ConversationUnread:
       type: object
+      description: Conversation summary for list view
       properties:
         id:
           type: string
+          description: Conversation unique identifier
         name:
           type: string
           nullable: true
+          description: Group name (if group)
+          maxLength: 64
         isGroup:
           type: boolean
+          description: Whether this is a group conversation
         photo:
           type: string
           format: byte
           nullable: true
+          description: Conversation photo
         lastMessage:
           $ref: '#/components/schemas/Message'
         unreadCount:
           type: integer
+          description: Number of unread messages
 
     ConversationDetails:
       type: object
+      description: Full conversation details
       properties:
         id:
           type: string
+          description: Conversation ID
         name:
           type: string
           nullable: true
+          description: Group name
         isGroup:
           type: boolean
+          description: Is this a group?
         ownerId:
           type: string
+          description: Owner User ID (if group)
         members:
           type: array
+          description: List of members
           items:
             $ref: '#/components/schemas/User'
         messages:
           type: array
+          description: List of messages
+          minItems: 1
+          maxItems: 5000
           items:
             $ref: '#/components/schemas/Message'
+      required:
+        - messages
 
     Message:
       type: object
+      description: A message in a conversation
       properties:
         id:
           type: string
+          description: Message ID
         conversationId:
           type: string
+          description: Conversation ID this message belongs to
         senderId:
           type: string
+          description: ID of the user who sent the message
         content:
           type: string
+          description: Text content of the message
+          minLength: 1
+          maxLength: 2048
+
+          pattern: "^.{1,2048}$"
+        photo:
+          type: string
+          format: byte
+          nullable: true
+          description: Base64 encoded photo (if type is image)
         type:
           type: string
+          description: Message type (text or image)
           enum: [text, image]
         timestamp:
           type: string
           format: date-time
+          description: ISO8601 timestamp
         received:
           type: boolean
+          description: True if received by recipient
         read:
           type: boolean
+          description: True if read by recipient
         reactions:
           type: array
+          description: List of reactions
           items:
             $ref: '#/components/schemas/Reaction'
 
     NewTextMessage:
       type: object
+      description: Payload for sending a text message
       properties:
         type:
           type: string
           enum: [text]
-        text:
+          description: Must be 'text'
+        content:
           type: string
+          description: The message text content
+          minLength: 1
+          maxLength: 2048
 
     NewPhotoMessage:
       type: object
+      description: Payload for sending a photo message
       properties:
         type:
           type: string
           enum: [image]
+          description: Must be 'image'
         image:
           type: string
           format: binary
+          description: The photo image data
 
     Reaction:
       type: object
+      description: A reaction to a message
       properties:
         id:
           type: string
+          description: Reaction ID
         userId:
           type: string
+          description: User who reacted
         emoji:
           type: string
+          description: The emoji character
+          minLength: 1
+          maxLength: 2
+          pattern: "^(\\u00a9|\\u00ae|[\\u2000-\\u3300]|\\ud83c[\\ud000-\\udfff]|\\ud83d[\\ud000-\\udfff]|\\ud83e[\\ud000-\\udfff])$"
 

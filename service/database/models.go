@@ -45,6 +45,9 @@ type Message struct {
 	Received       bool       `json:"received"`
 	Read           bool       `json:"read"`
 	Reactions      []Reaction `json:"reactions"`
+	ReplyToID      *uint64    `json:"replyToId,omitempty"` // Pointer because it can be null
+	ReplyTo        *Message   `json:"replyTo,omitempty"`   // Populated by GetConversation
+	Photo          []byte     `json:"photo,omitempty"`     // For media messages (text+photo)
 }
 
 // Reaction represents a user's reaction to a message

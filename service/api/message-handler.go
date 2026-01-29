@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -54,9 +55,44 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 	}
 
 	var req SendMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	var photoData []byte
+
+	// Check if Multipart
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		err := r.ParseMultipartForm(10 << 20) // 10 MB limit
+		if err != nil {
+			http.Error(w, "Invalid Multipart Form", http.StatusBadRequest)
+			return
+		}
+
+		req.Content = r.FormValue("content") // Text content
+		req.Type = r.FormValue("type")
+		if req.Type == "" {
+			req.Type = "image" // Default to image if multipart? Or mixed?
+		}
+
+		replyIdStr := r.FormValue("replyToId")
+		if replyIdStr != "" {
+			rid, _ := strconv.ParseUint(replyIdStr, 10, 64)
+			req.ReplyToID = rid
+		}
+
+		// Read file
+		file, _, err := r.FormFile("image")
+		if err == nil {
+			defer file.Close()
+			photoData, err = io.ReadAll(file)
+			if err != nil {
+				http.Error(w, "Error reading file", http.StatusInternalServerError)
+				return
+			}
+		}
+	} else {
+		// JSON
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	msg := database.Message{
@@ -64,6 +100,10 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 		SenderID:       ctx.UserID,
 		Type:           req.Type,
 		Content:        req.Content,
+		Photo:          photoData,
+	}
+	if req.ReplyToID != 0 {
+		msg.ReplyToID = &req.ReplyToID
 	}
 
 	sentMsg, err := rt.db.SendMessage(msg)
