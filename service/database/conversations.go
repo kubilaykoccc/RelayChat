@@ -9,6 +9,16 @@ import (
 
 // CreateConversation creates a new conversation (could be direct or group, starting as direct usually)
 func (db *appdbimpl) CreateConversation(ownerId uint64, otherUserId uint64) (Conversation, error) {
+	// Check if other user exists
+	var exists int
+	checkErr := db.c.QueryRow("SELECT COUNT(*) FROM users WHERE id = ?", otherUserId).Scan(&exists)
+	if checkErr != nil {
+		return Conversation{}, fmt.Errorf("error checking user existence: %w", checkErr)
+	}
+	if exists == 0 {
+		return Conversation{}, errors.New("target user not found")
+	}
+
 	// SQL to find common conversation (is_group=0)
 	query := `
 		SELECT c.id
@@ -31,7 +41,9 @@ func (db *appdbimpl) CreateConversation(ownerId uint64, otherUserId uint64) (Con
 	if err != nil {
 		return Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Insert Conversation
 	res, err := tx.Exec("INSERT INTO conversations (is_group, owner_id) VALUES (0, ?)", ownerId)
@@ -68,7 +80,9 @@ func (db *appdbimpl) CreateGroup(name string, ownerId uint64) (Conversation, err
 	if err != nil {
 		return Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Insert Conversation
 	res, err := tx.Exec("INSERT INTO conversations (name, is_group, owner_id) VALUES (?, 1, ?)", name, ownerId)
@@ -96,16 +110,6 @@ func (db *appdbimpl) CreateGroup(name string, ownerId uint64) (Conversation, err
 
 // GetMyConversations returns the list of conversations for the user
 func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, error) {
-	// Update last_delivered for the user in all conversations they are part of?
-	// Actually, strictly speaking, "received in their conversation list" means we fetched the list.
-	// We need to update last_delivered for ALL conversations returned.
-	// But we don't know the IDs yet.
-	// So we fetch, then update? Or update broadly?
-	// Broad update on membership:
-	// Optimization: Only update last_delivered if it's been more than 10 seconds
-	// If we don't update the timestamp, we also don't need to check for status updates,
-	// because "received" status logic relies on this timestamp moving forward.
-	// This makes 9/10 requests Read-Only, which never locks the DB.
 	res, err := db.c.Exec("UPDATE conversation_members SET last_delivered = ? WHERE user_id = ? AND last_delivered < ?", time.Now(), userId, time.Now().Add(-10*time.Second))
 	if err == nil {
 		rows, _ := res.RowsAffected()
@@ -128,16 +132,6 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 		}
 	}
 
-	// Query to fetch conversations with dynamic naming for 1-to-1
-	// We join with conversation_members again (cm2) to find the OTHER user in 1-to-1 chats (where is_group=0)
-	// Then we join with users (u) to get their username and photo.
-	// If is_group=1, we use c.name and c.photo.
-	// If is_group=0, we use u.username and u.photo.
-	// Query to fetch conversations with dynamic naming for 1-to-1
-	// We join with conversation_members again (cm2) to find the OTHER user in 1-to-1 chats (where is_group=0)
-	// Then we join with users (u) to get their username and photo.
-	// If is_group=1, we use c.name and c.photo.
-	// If is_group=0, we use u.username and u.photo.
 	query := `
 		SELECT 
             c.id, 
@@ -180,12 +174,11 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 		}
 
 		results = append(results, c)
-		// Store pointer to update inplace later
-		// Note: results[len(results)-1] is unsafe if we append?
-		// Actually, slices hold values. We need to update the slice elements.
-		// Better: store index in map? Or just iterate slice later?
-		// We'll iterate slice later and use a map for lookup of aux data.
+
 		convIDs = append(convIDs, c.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating conversations: %w", err)
 	}
 	// Pointers map for easy lookup
 	for i := range results {
@@ -193,9 +186,7 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 	}
 
 	if len(results) > 0 {
-		// 1. Batch Unread Counts
-		// Build placeholders based on length
-		// This is "cheating" string building but safe for ints/ids typically or utilize a helper
+
 		placeholders := ""
 		for i := 0; i < len(convIDs); i++ {
 			if i > 0 {
@@ -204,8 +195,6 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 			placeholders += "?"
 		}
 
-		// Unread Count Query
-		// args: userId, then convIDs...
 		ucQuery := fmt.Sprintf(`
 			SELECT conversation_id, COUNT(*) 
 			FROM messages 
@@ -226,10 +215,11 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 					}
 				}
 			}
+			if err := ucRows.Err(); err != nil {
+				return nil, fmt.Errorf("error iterating unread counts: %w", err)
+			}
 		}
 
-		// 2. Batch Last Message
-		// Max ID per conversation
 		lmQuery := fmt.Sprintf(`
 			SELECT m.id, m.conversation_id, m.sender_id, m.content, m.type, m.timestamp, m.received, m.read
 			FROM messages m
@@ -238,7 +228,6 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 			)
 		`, placeholders)
 
-		// args: convIDs...
 		lmRows, err := db.c.Query(lmQuery, convIDs...)
 		if err == nil {
 			defer lmRows.Close()
@@ -251,6 +240,9 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 						c.LastMessage = &m
 					}
 				}
+			}
+			if err := lmRows.Err(); err != nil {
+				return nil, fmt.Errorf("error iterating last messages: %w", err)
 			}
 		}
 	}
@@ -270,8 +262,6 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		return ConversationDetails{}, errors.New("access denied or conversation not found")
 	}
 
-	// Optimization: Debounce 'last_seen' update. Only update if older than 10s.
-	// This helps reducing write lock contention.
 	res, err := db.c.Exec("UPDATE conversation_members SET last_seen = ? WHERE conversation_id = ? AND user_id = ? AND last_seen < ?", time.Now(), conversationId, userId, time.Now().Add(-10*time.Second))
 	if err == nil {
 		rows, _ := res.RowsAffected()
@@ -281,9 +271,6 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		}
 	}
 
-	// Always attempt to mark messages as read when fetching conversation details.
-	// We do this separately from the debounce logic to ensure UI updates (badges clearing) happen immediately.
-	// Strict Read Logic: Update 'read' to 1 Only if ALL recipients have seen it.
 	updateRead := `
 		UPDATE messages
 		SET read = 1
@@ -298,7 +285,6 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 			AND cm.last_seen < messages.timestamp
 		) = 0
 	`
-	// Also trigger updateReceived for this conversation to be safe
 	updateReceived := `
 		UPDATE messages
 		SET received = 1
@@ -316,11 +302,6 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 	_, _ = db.c.Exec(updateReceived, conversationId, userId)
 	_, _ = db.c.Exec(updateRead, conversationId, userId)
 
-	// Fetch details
-	// Similar logic: if not group, we need to fetch the other user's name/photo.
-	// However, since we fetch Members later, it might be easier to fetch basic info first, then if 1-to-1, override from members list.
-	// BUT, let's do it in SQL for consistency and speed if possible, or just post-process.
-	// Post-processing is safer here because we fetch all members anyway.
 	var c ConversationDetails
 	var name sql.NullString
 	var ownerId sql.NullInt64
@@ -346,8 +327,10 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		}
 		c.Members = append(c.Members, u)
 	}
+	if err := mRows.Err(); err != nil {
+		return ConversationDetails{}, fmt.Errorf("error iterating members: %w", err)
+	}
 
-	// Fix Name/Photo for 1-to-1 if missing
 	if !c.IsGroup {
 		for _, m := range c.Members {
 			if m.ID != userId {
@@ -356,8 +339,7 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 				break
 			}
 		}
-		// If for some reason we are the only one (self-chat loop?), fallback to own name or handle gracefully.
-		// If c.Name is still empty (e.g. self chat?), set to "Me" or own username.
+
 		if c.Name == "" && len(c.Members) > 0 {
 			c.Name = c.Members[0].Username
 			c.Photo = c.Members[0].Photo
@@ -419,6 +401,9 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		m.Reactions = []Reaction{} // Initialize empty
 		messagesList = append(messagesList, m)
 	}
+	if err := msgRows.Err(); err != nil {
+		return ConversationDetails{}, fmt.Errorf("error iterating messages: %w", err)
+	}
 
 	// Create pointers map for second pass (reactions)
 	for i := range messagesList {
@@ -443,6 +428,10 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 					msg.Reactions = append(msg.Reactions, r)
 				}
 			}
+		}
+		if err := rRows.Err(); err != nil {
+			// Non-critical? But good to log or return
+			return ConversationDetails{}, fmt.Errorf("error iterating reactions: %w", err)
 		}
 	}
 

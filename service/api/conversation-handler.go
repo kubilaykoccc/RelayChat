@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/api/reqcontext"
-	"git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/database"
 	"github.com/julienschmidt/httprouter"
+	"github.com/kubilaykoccc/Wasa/service/api/reqcontext"
+	"github.com/kubilaykoccc/Wasa/service/database"
 )
 
 // getMyConversations returns the list of conversations
@@ -65,12 +65,7 @@ func (rt *_router) getConversation(w http.ResponseWriter, r *http.Request, ps ht
 		messages[i] = FromDatabaseMessage(m)
 	}
 
-	// Manual struct construction to match updated Response types (which use uint64)
-	// Actually, structures.go is updated to use uint64, so we can just return a struct matching it.
-	// But `ConversationDetails` in models.go has uint64 ID.
-	// `ConversationUnreadResponse` in structures.go has `ID uint64`.
-	// We need a `ConversationDetailsResponse`? Or just inline struct as before.
-	// The inline struct should have uint64 IDs.
+	// Construct response
 
 	resp := struct {
 		ID       uint64            `json:"id"`

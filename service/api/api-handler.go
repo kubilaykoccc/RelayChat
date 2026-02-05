@@ -27,13 +27,13 @@ func (rt *_router) Handler() http.Handler {
 	rt.router.PUT("/conversations/:conversationId/members/:userId", rt.wrap(rt.addToGroup))
 	rt.router.DELETE("/conversations/:conversationId/members/me", rt.wrap(rt.leaveGroup))
 
-	// Messages
 	rt.router.POST("/conversations/:conversationId/messages", rt.wrap(rt.sendMessage))
 	// rt.router.POST("/conversations/:conversationId/messages/forwarded", rt.wrap(rt.forwardMessage)) // Handled by wildcard
 	rt.router.DELETE("/conversations/:conversationId/messages/:messageId", rt.wrap(rt.deleteMessage))
 
 	// Reactions and Forwarding (combined to avoid httprouter conflict)
 	rt.router.POST("/conversations/:conversationId/messages/*action", rt.wrap(rt.handleMessageAction))
+	// rt.router.POST("/conversations/:conversationId/messages/:messageId/reactions", rt.wrap(rt.commentMessage)) // Handled by wildcard
 	rt.router.DELETE("/conversations/:conversationId/messages/:messageId/reactions/:reactionId", rt.wrap(rt.uncommentMessage))
 
 	// Special routes

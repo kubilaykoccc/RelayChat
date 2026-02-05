@@ -6,6 +6,28 @@ info:
 servers:
   - url: http://localhost:3000
     description: Local development server
+tags:
+  - name: login
+    description: Login and session management
+  - name: users
+    description: User management
+  - name: conversations
+    description: Conversation management
+  - name: messages
+    description: Message handling
+   - name: reactions
+    description: Reaction handling
+tags:
+  - name: login
+    description: Login related operations
+  - name: users
+    description: User related operations
+  - name: conversations
+    description: Conversation related operations
+  - name: messages
+    description: Message related operations
+  - name: reactions
+    description: Reaction related operations
 paths:
   /session:
     post:
@@ -17,17 +39,19 @@ paths:
         If the user exists, the user identifier is returned.
       operationId: doLogin
       requestBody:
-        description: User details
+        description: User details for login
         required: true
         content:
           application/json:
             schema:
               type: object
+              description: Login payload
               properties:
                 name:
                   type: string
+                  description: Username to login with
                   example: Maria
-                  pattern: "^.*?$"
+                  pattern: "^[a-z0-9]+$"
                   minLength: 3
                   maxLength: 16
               required:
@@ -39,20 +63,27 @@ paths:
             application/json:
               schema:
                 type: object
+                description: Login response containing user identifier
                 properties:
                   identifier:
                     type: string
+                    description: The user unique identifier
                     example: "abcdef012345"
+                    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    minLength: 36
+                    maxLength: 36
 
   /users/me/name:
     put:
       tags:
         - users
       summary: Set my username
+      description: Update the authenticated user's username.
       operationId: setMyUserName
       security:
         - BearerAuth: []
       requestBody:
+        description: New username
         required: true
         content:
           application/json:
@@ -63,6 +94,7 @@ paths:
                   type: string
                   minLength: 3
                   maxLength: 16
+                  pattern: "^[a-zA-Z0-9_]{3,16}$"
               required:
                 - name
       responses:
@@ -86,6 +118,7 @@ paths:
       tags:
         - users
       summary: Set my profile photo
+      description: Update the authenticated user's profile photo.
       operationId: setMyPhoto
       security:
         - BearerAuth: []
@@ -109,6 +142,7 @@ paths:
       tags:
         - users
       summary: Search for users
+      description: Search for other users by username substring.
       operationId: searchUsers
       security:
         - BearerAuth: []
@@ -151,6 +185,7 @@ paths:
       tags:
         - conversations
       summary: Create a new conversation (group)
+      description: Create a new group conversation or start a direct chat.
       operationId: createConversation
       security:
         - BearerAuth: []
@@ -163,10 +198,15 @@ paths:
                 name:
                   type: string
                   description: Group name (required for groups)
+                  maxLength: 64
+                  minLength: 1
                 members:
                   type: array
                   items:
                     type: string
+                    pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    minLength: 36
+                    maxLength: 36
                   description: Initial members (optional)
       responses:
         '201':
@@ -181,8 +221,12 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     get:
       tags:
         - conversations
@@ -210,12 +254,17 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     put:
       tags:
         - conversations
       summary: Set group name
+      description: Update the name of a group conversation.
       operationId: setGroupName
       security:
         - BearerAuth: []
@@ -229,6 +278,8 @@ paths:
                 name:
                   type: string
                   minLength: 1
+                  maxLength: 64
+                  pattern: "^.{1,64}$"
               required:
                 - name
       responses:
@@ -246,12 +297,17 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     put:
       tags:
         - conversations
       summary: Set group photo
+      description: Update the photo of a group conversation.
       operationId: setGroupPhoto
       security:
         - BearerAuth: []
@@ -281,17 +337,26 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
       - name: userId
         in: path
         required: true
+        description: User unique identifier to add
         schema:
           type: string
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          minLength: 36
+          maxLength: 36
     put:
       tags:
         - conversations
       summary: Add a user to a group
+      description: Add a user to an existing group conversation.
       operationId: addToGroup
       security:
         - BearerAuth: []
@@ -316,12 +381,17 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     delete:
       tags:
         - conversations
       summary: Leave a group
+      description: Remove self from a group conversation.
       operationId: leaveGroup
       security:
         - BearerAuth: []
@@ -334,12 +404,17 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     post:
       tags:
         - messages
       summary: Send or forward a message
+      description: Send a new text or photo message to the conversation.
       operationId: sendMessage
       security:
         - BearerAuth: []
@@ -364,12 +439,17 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     post:
       tags:
           - messages
       summary: Forward a message
+      description: Forward an existing message to this conversation.
       operationId: forwardMessage
       security:
         - BearerAuth: []
@@ -382,6 +462,9 @@ paths:
               properties:
                 forwardedMessageId:
                   type: string
+                  pattern: "^[a-zA-Z0-9-]+$"
+                  minLength: 1
+                  maxLength: 64
               required:
                 - forwardedMessageId
       responses:
@@ -397,17 +480,26 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
       - name: messageId
         in: path
         required: true
+        description: Message unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     delete:
       tags:
         - messages
       summary: Delete a message
+      description: Delete a message from the conversation.
       operationId: deleteMessage
       security:
         - BearerAuth: []
@@ -420,17 +512,26 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
       - name: messageId
         in: path
         required: true
+        description: Message unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     post:
       tags:
         - reactions
       summary: React to a message (comment)
+      description: Add a reaction emoji to a message.
       operationId: commentMessage
       security:
         - BearerAuth: []
@@ -443,6 +544,9 @@ paths:
               properties:
                 emoji:
                   type: string
+                  minLength: 1
+                  maxLength: 2
+                  pattern: "^(\\u00a9|\\u00ae|[\\u2000-\\u3300]|\\ud83c[\\ud000-\\udfff]|\\ud83d[\\ud000-\\udfff]|\\ud83e[\\ud000-\\udfff])$"
               required:
                 - emoji
       responses:
@@ -458,22 +562,35 @@ paths:
       - name: conversationId
         in: path
         required: true
+        description: Conversation unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
       - name: messageId
         in: path
         required: true
+        description: Message unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
       - name: reactionId
         in: path
         required: true
+        description: Reaction unique identifier
         schema:
           type: string
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
     delete:
       tags:
         - reactions
       summary: Remove a reaction (uncomment)
+      description: Remove a reaction from a message.
       operationId: uncommentMessage
       security:
         - BearerAuth: []
@@ -490,96 +607,114 @@ components:
   schemas:
     User:
       type: object
-      description: API User model
+      description: API User model representing a registered user.
       properties:
         id:
-          type: integer
-          format: int64
-          description: User unique identifier
+          type: string
+          description: User unique identifier (UUID format).
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          minLength: 36
+          maxLength: 36
         username:
           type: string
-          description: Unique username
+          description: Unique username for display and login.
           minLength: 3
           maxLength: 16
           pattern: "^[a-zA-Z0-9_]{3,16}$"
         photo:
           type: string
           format: byte
-          nullable: true
-          description: Base64 encoded profile photo (optional)
+          description: Base64 encoded profile photo (optional).
+          minLength: 0
+          maxLength: 5242880 # 5MB approx
       required:
         - username
+        - id
 
 
     Error:
       type: object
-      description: Standard error response
+      description: Standard error response structure.
       properties:
         code:
           type: string
-          description: Error code identifier
+          description: Machine-readable error code identifier.
           minLength: 1
           maxLength: 50
           pattern: "^[A-Z_]{1,50}$"
         message:
           type: string
-          description: Human readable error message
+          description: Human readable error message describing what went wrong.
           minLength: 1
           maxLength: 200
           pattern: "^.{1,200}$"
 
     ConversationUnread:
       type: object
-      description: Conversation summary for list view
+      description: Conversation summary structure used in list views, containing unread counts.
       properties:
         id:
           type: string
-          description: Conversation unique identifier
+          description: Conversation unique identifier.
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
         name:
           type: string
-          nullable: true
-          description: Group name (if group)
+          description: Group name (if group), otherwise empty or ignored.
+          minLength: 0
           maxLength: 64
         isGroup:
           type: boolean
-          description: Whether this is a group conversation
+          description: Boolean flag indicating if this is a group conversation.
         photo:
           type: string
           format: byte
-          nullable: true
-          description: Conversation photo
+          description: Base64 encoded conversation photo (optional).
+          minLength: 0
+          maxLength: 5242880
         lastMessage:
           $ref: '#/components/schemas/Message'
         unreadCount:
           type: integer
-          description: Number of unread messages
+          description: Count of messages not yet read by the user in this conversation.
+          minimum: 0
 
     ConversationDetails:
       type: object
-      description: Full conversation details
+      description: Detailed conversation object including members and messages.
       properties:
         id:
           type: string
-          description: Conversation ID
+          description: Conversation unique identifier.
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
         name:
           type: string
-          nullable: true
-          description: Group name
+          description: Group name (if group).
+          minLength: 0
+          maxLength: 64
         isGroup:
           type: boolean
-          description: Is this a group?
+          description: Boolean flag indicating if this is a group conversation.
         ownerId:
           type: string
-          description: Owner User ID (if group)
+          description: User ID of the group owner (if group).
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          minLength: 36
+          maxLength: 36
         members:
           type: array
-          description: List of members
+          description: List of users participating in the conversation.
+          minItems: 0
+          maxItems: 100
           items:
             $ref: '#/components/schemas/User'
         messages:
           type: array
-          description: List of messages
-          minItems: 1
+          description: List of the most recent messages in the conversation.
+          minItems: 0
           maxItems: 5000
           items:
             $ref: '#/components/schemas/Message'
@@ -588,88 +723,107 @@ components:
 
     Message:
       type: object
-      description: A message in a conversation
+      description: Represents a single message within a conversation.
       properties:
         id:
           type: string
-          description: Message ID
+          description: Unique message identifier.
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
         conversationId:
           type: string
-          description: Conversation ID this message belongs to
+          description: ID of the conversation this message belongs to.
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
         senderId:
           type: string
-          description: ID of the user who sent the message
+          description: User ID of the sender.
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          minLength: 36
+          maxLength: 36
         content:
           type: string
-          description: Text content of the message
-          minLength: 1
+          description: Text content of the message.
+          minLength: 0
           maxLength: 2048
-
-          pattern: "^.{1,2048}$"
         photo:
           type: string
           format: byte
-          nullable: true
-          description: Base64 encoded photo (if type is image)
+          description: Base64 encoded photo data (if type is image).
+          minLength: 0
+          maxLength: 10485760 # 10MB
         type:
           type: string
-          description: Message type (text or image)
+          description: Type of the message (text or image).
           enum: [text, image]
         timestamp:
           type: string
           format: date-time
-          description: ISO8601 timestamp
+          description: ISO8601 formatted timestamp of when the message was sent.
         received:
           type: boolean
-          description: True if received by recipient
+          description: Status flag indicating if the message was received.
         read:
           type: boolean
-          description: True if read by recipient
+          description: Status flag indicating if the message was read.
         reactions:
           type: array
-          description: List of reactions
+          description: List of reactions (emojis) added to this message.
+          minItems: 0
+          maxItems: 100
           items:
             $ref: '#/components/schemas/Reaction'
 
     NewTextMessage:
       type: object
-      description: Payload for sending a text message
+      description: Request payload for sending a new text message.
       properties:
         type:
           type: string
           enum: [text]
-          description: Must be 'text'
+          description: Message type discriminator (must be 'text').
         content:
           type: string
-          description: The message text content
+          description: The text body of the message.
           minLength: 1
           maxLength: 2048
 
     NewPhotoMessage:
       type: object
-      description: Payload for sending a photo message
+      description: Request payload for sending a new photo message.
       properties:
         type:
           type: string
           enum: [image]
-          description: Must be 'image'
+          description: Message type discriminator (must be 'image').
         image:
           type: string
           format: binary
-          description: The photo image data
+          description: Binary image data to upload.
 
     Reaction:
       type: object
-      description: A reaction to a message
+      description: Represents a user reaction to a a message.
       properties:
         id:
           type: string
-          description: Reaction ID
+          description: Unique reaction identifier.
+          pattern: "^[a-zA-Z0-9-]+$"
+          minLength: 1
+          maxLength: 64
         userId:
           type: string
-          description: User who reacted
+          description: User ID of the person who reacted.
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          minLength: 36
+          maxLength: 36
         emoji:
           type: string
+          description: The emoji character used for reaction.
+          minLength: 1
+          maxLength: 10
           description: The emoji character
           minLength: 1
           maxLength: 2

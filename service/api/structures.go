@@ -1,6 +1,6 @@
 package api
 
-import "git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/database"
+import "github.com/kubilaykoccc/Wasa/service/database"
 
 // structures.go contains the Go structs for API requests and responses that differ from the DB models
 
@@ -124,14 +124,8 @@ type SetGroupNameRequest struct {
 
 // SendMessageRequest
 type SendMessageRequest struct {
-	Type    string `json:"type"`              // text or image
-	Content string `json:"content,omitempty"` // For text messages, field is 'text'? Spec: NewTextMessage has 'text'.
-	// Wait, the spec has 'text' property for text messages and 'image' for photo messages (binary).
-	// Actually the openapi says:
-	// NewTextMessage: { type: "text", text: "..." }
-	// NewPhotoMessage: { type: "image", image: binary }
-
-	// For JSON unmarshalling of text message:
+	Type      string `json:"type"`
+	Content   string `json:"content,omitempty"`
 	Text      string `json:"text,omitempty"`
 	ReplyToID uint64 `json:"replyToId,omitempty"`
 }

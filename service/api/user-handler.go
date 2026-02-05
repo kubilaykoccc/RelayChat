@@ -5,8 +5,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/api/reqcontext"
 	"github.com/julienschmidt/httprouter"
+	"github.com/kubilaykoccc/Wasa/service/api/reqcontext"
 )
 
 // setMyUserName updates the user's username
@@ -30,11 +30,8 @@ func (rt *_router) setMyUserName(w http.ResponseWriter, r *http.Request, ps http
 	err := rt.db.SetMyUserName(ctx.UserID, req.Name)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to set username")
-		// Could be 409 Conflict if name taken?
-		// My DB implementation doesn't check unique constraint explicitly but existing user handling.
-		// Wait, the table definition has `username TEXT NOT NULL UNIQUE`.
-		// So `SetMyUserName` will fail if not unique.
-		http.Error(w, "Username already in use or invalid", http.StatusConflict) // simplified
+		// Handle conflict if username is already taken (UNIQUE constraint)
+		http.Error(w, "Username already in use or invalid", http.StatusConflict)
 		return
 	}
 

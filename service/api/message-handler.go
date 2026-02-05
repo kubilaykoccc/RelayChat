@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/api/reqcontext"
-	"git.sapienzaapps.it/fantasticcoffee/fantastic-coffee-decaffeinated/service/database"
 	"github.com/julienschmidt/httprouter"
+	"github.com/kubilaykoccc/Wasa/service/api/reqcontext"
+	"github.com/kubilaykoccc/Wasa/service/database"
 )
 
 // sendMessage sends a message
@@ -33,13 +33,8 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 	// Smart logic: Check if conversation exists
 	_, err = rt.db.GetConversation(possibleId, ctx.UserID)
 	if err != nil {
-		// Not found or not allowed.
-		// Try to interpret as User ID for 1-on-1
-		// Check if possibleId matches a USER?
-		// But in numeric system, UserID and ConversationID are just integers.
-		// We can try to CreateConversation(ctx.UserID, possibleId).
-		// If possibleId refers to a User, this finds/creates the conversation.
-		// If it's just a random number, it fails (foreign key error on user_id).
+		// Not found as a conversation ID.
+		// Try to interpret as User ID to find/create a 1-on-1 conversation.
 
 		convo, createErr := rt.db.CreateConversation(ctx.UserID, possibleId)
 		if createErr == nil {
@@ -65,7 +60,7 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 			return
 		}
 
-		req.Content = r.FormValue("content") // Text content
+		req.Text = r.FormValue("content") // Text content
 		req.Type = r.FormValue("type")
 		if req.Type == "" {
 			req.Type = "image" // Default to image if multipart? Or mixed?
@@ -95,11 +90,17 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 		}
 	}
 
+	// Handle content field fallback (frontend might send 'content' or 'text')
+	finalContent := req.Text
+	if finalContent == "" {
+		finalContent = req.Content
+	}
+
 	msg := database.Message{
 		ConversationID: conversationId,
 		SenderID:       ctx.UserID,
 		Type:           req.Type,
-		Content:        req.Content,
+		Content:        finalContent,
 		Photo:          photoData,
 	}
 	if req.ReplyToID != 0 {
