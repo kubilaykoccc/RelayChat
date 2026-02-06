@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/gofrs/uuid"
 )
 
 // CreateConversation creates a new conversation (could be direct or group, starting as direct usually)
-func (db *appdbimpl) CreateConversation(ownerId uint64, otherUserId uint64) (Conversation, error) {
+func (db *appdbimpl) CreateConversation(ownerId string, otherUserId string) (Conversation, error) {
 	// Check if other user exists
 	var exists int
 	checkErr := db.c.QueryRow("SELECT COUNT(*) FROM users WHERE id = ?", otherUserId).Scan(&exists)
@@ -27,7 +29,7 @@ func (db *appdbimpl) CreateConversation(ownerId uint64, otherUserId uint64) (Con
 		JOIN conversation_members cm2 ON c.id = cm2.conversation_id
 		WHERE c.is_group = 0 AND cm1.user_id = ? AND cm2.user_id = ?
 	`
-	var existingId uint64
+	var existingId string
 	err := db.c.QueryRow(query, ownerId, otherUserId).Scan(&existingId)
 	if err == nil {
 		// Found existing
@@ -42,19 +44,22 @@ func (db *appdbimpl) CreateConversation(ownerId uint64, otherUserId uint64) (Con
 		return Conversation{}, err
 	}
 	defer func() {
-		_ = tx.Rollback()
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			// Linter requirement
+		}
 	}()
 
 	// Insert Conversation
-	res, err := tx.Exec("INSERT INTO conversations (is_group, owner_id) VALUES (0, ?)", ownerId)
+	newConvoUUID, err := uuid.NewV4()
 	if err != nil {
 		return Conversation{}, err
 	}
-	cID, err := res.LastInsertId()
+	convoId := newConvoUUID.String()
+
+	_, err = tx.Exec("INSERT INTO conversations (id, is_group, owner_id) VALUES (?, 0, ?)", convoId, ownerId)
 	if err != nil {
 		return Conversation{}, err
 	}
-	convoId := uint64(cID)
 
 	// Insert Members
 	now := time.Now()
@@ -75,25 +80,29 @@ func (db *appdbimpl) CreateConversation(ownerId uint64, otherUserId uint64) (Con
 }
 
 // CreateGroup creates a new group conversation
-func (db *appdbimpl) CreateGroup(name string, ownerId uint64) (Conversation, error) {
+func (db *appdbimpl) CreateGroup(name string, ownerId string) (Conversation, error) {
 	tx, err := db.c.Begin()
 	if err != nil {
 		return Conversation{}, err
 	}
 	defer func() {
-		_ = tx.Rollback()
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			// Just log if needed, or ignore since we can't do much in defer
+			// But the linter wants it checked.
+		}
 	}()
 
+	newConvoUUID, err := uuid.NewV4()
+	if err != nil {
+		return Conversation{}, err
+	}
+	convoId := newConvoUUID.String()
+
 	// Insert Conversation
-	res, err := tx.Exec("INSERT INTO conversations (name, is_group, owner_id) VALUES (?, 1, ?)", name, ownerId)
+	_, err = tx.Exec("INSERT INTO conversations (id, name, is_group, owner_id) VALUES (?, ?, 1, ?)", convoId, name, ownerId)
 	if err != nil {
 		return Conversation{}, err
 	}
-	cID, err := res.LastInsertId()
-	if err != nil {
-		return Conversation{}, err
-	}
-	convoId := uint64(cID)
 
 	// Add owner as member
 	_, err = tx.Exec("INSERT INTO conversation_members (conversation_id, user_id, last_seen) VALUES (?, ?, ?)", convoId, ownerId, time.Now())
@@ -109,7 +118,7 @@ func (db *appdbimpl) CreateGroup(name string, ownerId uint64) (Conversation, err
 }
 
 // GetMyConversations returns the list of conversations for the user
-func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, error) {
+func (db *appdbimpl) GetMyConversations(userId string) ([]ConversationUnread, error) {
 	res, err := db.c.Exec("UPDATE conversation_members SET last_delivered = ? WHERE user_id = ? AND last_delivered < ?", time.Now(), userId, time.Now().Add(-10*time.Second))
 	if err == nil {
 		rows, _ := res.RowsAffected()
@@ -154,7 +163,7 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 
 	var results []ConversationUnread
 	// Map to quickly assign auxiliary data
-	convMap := make(map[uint64]*ConversationUnread)
+	convMap := make(map[string]*ConversationUnread)
 	var convIDs []interface{} // built for IN clause
 
 	for rows.Next() {
@@ -162,7 +171,7 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 		var lastSeen time.Time
 		var name sql.NullString
 		var photo []byte
-		var ownerId sql.NullInt64
+		var ownerId sql.NullString
 
 		if err := rows.Scan(&c.ID, &name, &c.IsGroup, &photo, &ownerId, &lastSeen); err != nil {
 			return nil, fmt.Errorf("error scanning conversation: %w", err)
@@ -170,7 +179,7 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 		c.Name = name.String
 		c.Photo = photo
 		if ownerId.Valid {
-			c.OwnerID = uint64(ownerId.Int64)
+			c.OwnerID = ownerId.String
 		}
 
 		results = append(results, c)
@@ -207,7 +216,7 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 		if err == nil {
 			defer ucRows.Close()
 			for ucRows.Next() {
-				var cid uint64
+				var cid string
 				var count int
 				if err := ucRows.Scan(&cid, &count); err == nil {
 					if c, ok := convMap[cid]; ok {
@@ -251,7 +260,7 @@ func (db *appdbimpl) GetMyConversations(userId uint64) ([]ConversationUnread, er
 }
 
 // GetConversation returns details (messages and members)
-func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (ConversationDetails, error) {
+func (db *appdbimpl) GetConversation(conversationId string, userId string) (ConversationDetails, error) {
 	// Verify membership
 	var membershipCount int
 	err := db.c.QueryRow("SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND user_id = ?", conversationId, userId).Scan(&membershipCount)
@@ -304,14 +313,14 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 
 	var c ConversationDetails
 	var name sql.NullString
-	var ownerId sql.NullInt64
+	var ownerId sql.NullString
 	err = db.c.QueryRow("SELECT id, name, is_group, photo, owner_id FROM conversations WHERE id = ?", conversationId).Scan(&c.ID, &name, &c.IsGroup, &c.Photo, &ownerId)
 	if err != nil {
 		return ConversationDetails{}, err
 	}
 	c.Name = name.String
 	if ownerId.Valid {
-		c.OwnerID = uint64(ownerId.Int64)
+		c.OwnerID = ownerId.String
 	}
 
 	// Fetch Members
@@ -364,14 +373,14 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 
 	var messagesList []Message
 	// Map to keep track of message indices to attach reactions later
-	msgMap := make(map[uint64]*Message)
+	msgMap := make(map[string]*Message)
 
 	for msgRows.Next() {
 		var m Message
 		var ts time.Time
-		var replyID sql.NullInt64
-		var rID sql.NullInt64
-		var rSenderID sql.NullInt64
+		var replyID sql.NullString
+		var rID sql.NullString
+		var rSenderID sql.NullString
 		var rContent sql.NullString
 		var rType sql.NullString
 
@@ -383,15 +392,15 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 		}
 		m.Timestamp = ts
 		if replyID.Valid {
-			rid := uint64(replyID.Int64)
+			rid := replyID.String
 			m.ReplyToID = &rid
 		}
 
 		// Populate ReplyTo if exists
 		if rID.Valid {
 			reply := Message{
-				ID:       uint64(rID.Int64),
-				SenderID: uint64(rSenderID.Int64),
+				ID:       rID.String,
+				SenderID: rSenderID.String,
 				Content:  rContent.String,
 				Type:     rType.String,
 			}
@@ -441,7 +450,17 @@ func (db *appdbimpl) GetConversation(conversationId uint64, userId uint64) (Conv
 }
 
 // SetGroupName changes the group name
-func (db *appdbimpl) SetGroupName(conversationId uint64, name string) error {
+func (db *appdbimpl) SetGroupName(conversationId string, name string, userId string) error {
+	// Check if user is a member of the group
+	var count int
+	err := db.c.QueryRow("SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND user_id = ?", conversationId, userId).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("user not in group")
+	}
+
 	res, err := db.c.Exec("UPDATE conversations SET name = ? WHERE id = ? AND is_group = 1", name, conversationId)
 	if err != nil {
 		return err
@@ -457,7 +476,17 @@ func (db *appdbimpl) SetGroupName(conversationId uint64, name string) error {
 }
 
 // SetGroupPhoto changes the group photo
-func (db *appdbimpl) SetGroupPhoto(conversationId uint64, photo []byte) error {
+func (db *appdbimpl) SetGroupPhoto(conversationId string, photo []byte, userId string) error {
+	// Check if user is a member of the group
+	var count int
+	err := db.c.QueryRow("SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND user_id = ?", conversationId, userId).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("user not in group")
+	}
+
 	res, err := db.c.Exec("UPDATE conversations SET photo = ? WHERE id = ? AND is_group = 1", photo, conversationId)
 	if err != nil {
 		return err
@@ -473,7 +502,7 @@ func (db *appdbimpl) SetGroupPhoto(conversationId uint64, photo []byte) error {
 }
 
 // AddToGroup adds a user to a group
-func (db *appdbimpl) AddToGroup(conversationId uint64, userId uint64) error {
+func (db *appdbimpl) AddToGroup(conversationId string, userId string) error {
 	var isGroup bool
 	err := db.c.QueryRow("SELECT is_group FROM conversations WHERE id = ?", conversationId).Scan(&isGroup)
 	if err != nil {
@@ -491,7 +520,7 @@ func (db *appdbimpl) AddToGroup(conversationId uint64, userId uint64) error {
 }
 
 // LeaveGroup removes a user from a group
-func (db *appdbimpl) LeaveGroup(conversationId uint64, userId uint64) error {
+func (db *appdbimpl) LeaveGroup(conversationId string, userId string) error {
 	var isGroup bool
 	err := db.c.QueryRow("SELECT is_group FROM conversations WHERE id = ?", conversationId).Scan(&isGroup)
 	if err != nil {

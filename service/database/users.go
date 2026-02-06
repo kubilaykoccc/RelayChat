@@ -4,35 +4,38 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/gofrs/uuid"
 )
 
 // DoLogin checks if a user exists. If not, creates one. Returns the user ID (which acts as the token).
-func (db *appdbimpl) DoLogin(username string) (uint64, error) {
-	var id uint64
+func (db *appdbimpl) DoLogin(username string) (string, error) {
+	var id string
 	err := db.c.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&id)
 	if err == nil {
 		return id, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("error querying user: %w", err)
+		return "", fmt.Errorf("error querying user: %w", err)
 	}
 
 	// User not found, create new one
-	res, err := db.c.Exec("INSERT INTO users (username) VALUES (?)", username)
+	newId, err := uuid.NewV4()
 	if err != nil {
-		return 0, fmt.Errorf("error inserting user: %w", err)
+		return "", fmt.Errorf("error generating uuid: %w", err)
+	}
+	idStr := newId.String()
+
+	_, err = db.c.Exec("INSERT INTO users (id, username) VALUES (?, ?)", idStr, username)
+	if err != nil {
+		return "", fmt.Errorf("error inserting user: %w", err)
 	}
 
-	lastId, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("error getting last insert id: %w", err)
-	}
-
-	return uint64(lastId), nil
+	return idStr, nil
 }
 
 // SetMyUserName updates the user's username
-func (db *appdbimpl) SetMyUserName(id uint64, name string) error {
+func (db *appdbimpl) SetMyUserName(id string, name string) error {
 	res, err := db.c.Exec("UPDATE users SET username = ? WHERE id = ?", name, id)
 	if err != nil {
 		return fmt.Errorf("error updating username: %w", err)
@@ -48,7 +51,7 @@ func (db *appdbimpl) SetMyUserName(id uint64, name string) error {
 }
 
 // SetMyPhoto updates the user's photo
-func (db *appdbimpl) SetMyPhoto(id uint64, photo []byte) error {
+func (db *appdbimpl) SetMyPhoto(id string, photo []byte) error {
 	res, err := db.c.Exec("UPDATE users SET photo = ? WHERE id = ?", photo, id)
 	if err != nil {
 		return fmt.Errorf("error updating photo: %w", err)
@@ -86,7 +89,7 @@ func (db *appdbimpl) SearchUsers(query string) ([]User, error) {
 }
 
 // GetUser retrieves a user by ID
-func (db *appdbimpl) GetUser(id uint64) (User, error) {
+func (db *appdbimpl) GetUser(id string) (User, error) {
 	var u User
 	err := db.c.QueryRow("SELECT id, username, photo FROM users WHERE id = ?", id).Scan(&u.ID, &u.Username, &u.Photo)
 	if err != nil {

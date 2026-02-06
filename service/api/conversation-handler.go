@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
-	"strconv"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/kubilaykoccc/Wasa/service/api/reqcontext"
@@ -13,7 +12,7 @@ import (
 
 // getMyConversations returns the list of conversations
 func (rt *_router) getMyConversations(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -36,14 +35,13 @@ func (rt *_router) getMyConversations(w http.ResponseWriter, r *http.Request, ps
 
 // getConversation returns conversation details
 func (rt *_router) getConversation(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	conversationId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
+	conversationId := ps.ByName("conversationId")
+	if conversationId == "" {
 		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
 		return
 	}
@@ -68,11 +66,11 @@ func (rt *_router) getConversation(w http.ResponseWriter, r *http.Request, ps ht
 	// Construct response
 
 	resp := struct {
-		ID       uint64            `json:"id"`
+		ID       string            `json:"id"`
 		Name     string            `json:"name,omitempty"`
 		IsGroup  bool              `json:"isGroup"`
 		Photo    []byte            `json:"photo,omitempty"`
-		OwnerID  uint64            `json:"ownerId"`
+		OwnerID  string            `json:"ownerId"`
 		Members  []UserResponse    `json:"members"`
 		Messages []MessageResponse `json:"messages"`
 	}{
@@ -90,16 +88,16 @@ func (rt *_router) getConversation(w http.ResponseWriter, r *http.Request, ps ht
 }
 
 // setGroupName sets the group name
+// setGroupName sets the group name
 func (rt *_router) setGroupName(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	conversationId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
+	conversationId := ps.ByName("groupId")
+	if conversationId == "" {
+		http.Error(w, "Invalid Group ID", http.StatusBadRequest)
 		return
 	}
 
@@ -113,9 +111,11 @@ func (rt *_router) setGroupName(w http.ResponseWriter, r *http.Request, ps httpr
 		return
 	}
 
-	err = rt.db.SetGroupName(conversationId, req.Name)
+	// Updated signature: passing ctx.UserID
+	err := rt.db.SetGroupName(conversationId, req.Name, ctx.UserID)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to set group name")
+		// Could be 403 Forbidden or 404 Not Found
 		http.Error(w, "Forbidden or Not Found", http.StatusForbidden)
 		return
 	}
@@ -125,15 +125,14 @@ func (rt *_router) setGroupName(w http.ResponseWriter, r *http.Request, ps httpr
 
 // setGroupPhoto sets the group photo
 func (rt *_router) setGroupPhoto(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	conversationId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
+	conversationId := ps.ByName("groupId")
+	if conversationId == "" {
+		http.Error(w, "Invalid Group ID", http.StatusBadRequest)
 		return
 	}
 
@@ -143,7 +142,8 @@ func (rt *_router) setGroupPhoto(w http.ResponseWriter, r *http.Request, ps http
 		return
 	}
 
-	err = rt.db.SetGroupPhoto(conversationId, photoData)
+	// Updated signature: passing ctx.UserID
+	err = rt.db.SetGroupPhoto(conversationId, photoData, ctx.UserID)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to set group photo")
 		http.Error(w, "Forbidden or Not Found", http.StatusForbidden)
@@ -155,26 +155,24 @@ func (rt *_router) setGroupPhoto(w http.ResponseWriter, r *http.Request, ps http
 
 // addToGroup adds a user
 func (rt *_router) addToGroup(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	conversationId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
+	conversationId := ps.ByName("groupId")
+	if conversationId == "" {
+		http.Error(w, "Invalid Group ID", http.StatusBadRequest)
 		return
 	}
 
-	userIdStr := ps.ByName("userId")
-	userId, err := strconv.ParseUint(userIdStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid User ID", http.StatusBadRequest)
+	var req AddMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	err = rt.db.AddToGroup(conversationId, userId)
+	err := rt.db.AddToGroup(conversationId, req.UserID)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to add user to group")
 		http.Error(w, "Forbidden or Not Found", http.StatusForbidden)
@@ -186,20 +184,25 @@ func (rt *_router) addToGroup(w http.ResponseWriter, r *http.Request, ps httprou
 
 // leaveGroup removes me
 func (rt *_router) leaveGroup(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	conversationId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
+	conversationId := ps.ByName("groupId")
+	if conversationId == "" {
+		http.Error(w, "Invalid Group ID", http.StatusBadRequest)
 		return
 	}
 
-	err = rt.db.LeaveGroup(conversationId, ctx.UserID)
+	err := rt.db.LeaveGroup(conversationId, ctx.UserID)
 	if err != nil {
+		// Handle 'user not in group' gracefully
+		if err.Error() == "user not in group" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		ctx.Logger.WithError(err).Error("failed to leave group")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -209,8 +212,8 @@ func (rt *_router) leaveGroup(w http.ResponseWriter, r *http.Request, ps httprou
 }
 
 // createConversation creates a new conversation (group)
-func (rt *_router) createConversation(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+func (rt *_router) startConversation(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -229,7 +232,7 @@ func (rt *_router) createConversation(w http.ResponseWriter, r *http.Request, ps
 		conversation, err = rt.db.CreateGroup(req.Name, ctx.UserID)
 	} else {
 		// 1-on-1
-		// Check members is int array now
+		// Check members is string array now
 		if len(req.Members) == 1 {
 			conversation, err = rt.db.CreateConversation(ctx.UserID, req.Members[0])
 		} else {
@@ -268,11 +271,11 @@ func (rt *_router) createConversation(w http.ResponseWriter, r *http.Request, ps
 	}
 
 	resp := struct {
-		ID       uint64            `json:"id"`
+		ID       string            `json:"id"`
 		Name     string            `json:"name,omitempty"`
 		IsGroup  bool              `json:"isGroup"`
 		Photo    []byte            `json:"photo,omitempty"`
-		OwnerID  uint64            `json:"ownerId"`
+		OwnerID  string            `json:"ownerId"`
 		Members  []UserResponse    `json:"members"`
 		Messages []MessageResponse `json:"messages"`
 	}{

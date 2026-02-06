@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/julienschmidt/httprouter"
@@ -14,29 +13,29 @@ import (
 
 // sendMessage sends a message
 func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	// Try parsing as integer
-	var conversationId uint64
-	var err error
-
-	possibleId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
+	conversationId := ps.ByName("conversationId")
+	if conversationId == "" {
 		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
 		return
 	}
 
 	// Smart logic: Check if conversation exists
-	_, err = rt.db.GetConversation(possibleId, ctx.UserID)
+	// But first, we assume it's a UUID string.
+	// If the frontend sends a user ID here (for implicit 1-on-1 creation), it's also a UUID string.
+
+	_, err := rt.db.GetConversation(conversationId, ctx.UserID)
 	if err != nil {
 		// Not found as a conversation ID.
 		// Try to interpret as User ID to find/create a 1-on-1 conversation.
+		// Since both are strings, we just try to create.
 
-		convo, createErr := rt.db.CreateConversation(ctx.UserID, possibleId)
+		possibleUserId := conversationId
+		convo, createErr := rt.db.CreateConversation(ctx.UserID, possibleUserId)
 		if createErr == nil {
 			conversationId = convo.ID
 		} else {
@@ -45,8 +44,6 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 			http.Error(w, "Conversation not found", http.StatusNotFound)
 			return
 		}
-	} else {
-		conversationId = possibleId
 	}
 
 	var req SendMessageRequest
@@ -68,8 +65,7 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 
 		replyIdStr := r.FormValue("replyToId")
 		if replyIdStr != "" {
-			rid, _ := strconv.ParseUint(replyIdStr, 10, 64)
-			req.ReplyToID = rid
+			req.ReplyToID = replyIdStr
 		}
 
 		// Read file
@@ -103,7 +99,7 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 		Content:        finalContent,
 		Photo:          photoData,
 	}
-	if req.ReplyToID != 0 {
+	if req.ReplyToID != "" {
 		msg.ReplyToID = &req.ReplyToID
 	}
 
@@ -122,15 +118,14 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 
 // forwardMessage forwards a message
 func (rt *_router) forwardMessage(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("conversationId")
-	conversationId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid Conversation ID", http.StatusBadRequest)
+	messageId := ps.ByName("messageId")
+	if messageId == "" {
+		http.Error(w, "Invalid Message ID", http.StatusBadRequest)
 		return
 	}
 
@@ -140,7 +135,32 @@ func (rt *_router) forwardMessage(w http.ResponseWriter, r *http.Request, ps htt
 		return
 	}
 
-	msg, err := rt.db.ForwardMessage(conversationId, req.ForwardedMessageID, ctx.UserID)
+	// Wait, the logic used to be: route param was messageId (to forward).
+	// But `api-handler.go` (Step 204) matches route: `/messages/:messageId/forward` -> `h.forwardMessage`
+	// This means `messageId` is the message being forwarded.
+	// But `ForwardMessageRequest` struct (Step 205) has `ForwardedMessageID`.
+	// The implementation in `messages.go` (Step 288) `ForwardMessage(conversationId, forwardedMessageId, senderId)`.
+
+	// So the Request Body `ForwardMessageRequest` likely contains the TARGET `ConversationID`.
+	// Wait, checking `structures.go` Step 258:
+	// type ForwardMessageRequest struct {
+	// 	ForwardedMessageID string `json:"forwardedMessageId"`
+	// 	ConversationID     string `json:"conversationId"`
+	// }
+
+	// If the route is `/messages/:messageId/forward`, the `messageId` is in path.
+	// The body should contain the destination `conversationId`.
+	// The `ForwardedMessageID` in struct might be redundant or for the other route style.
+
+	// Let's assume the body has valid `ConversationID`.
+	// And we take `messageId` from path.
+
+	// Oh wait, `api.yaml` (Step 248 plan) said: POST /messages/:messageId/forward
+	// So `api-handler.go` is correct.
+	// The struct `ForwardMessageRequest` has `ForwardedMessageID`... maybe from old code?
+	// Let's use `messageId` from PATH as the ID to decode.
+
+	msg, err := rt.db.ForwardMessage(req.ConversationID, messageId, ctx.UserID)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to forward message")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -155,19 +175,18 @@ func (rt *_router) forwardMessage(w http.ResponseWriter, r *http.Request, ps htt
 
 // deleteMessage deletes a message
 func (rt *_router) deleteMessage(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("messageId")
-	messageId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
+	messageId := ps.ByName("messageId")
+	if messageId == "" {
 		http.Error(w, "Invalid Message ID", http.StatusBadRequest)
 		return
 	}
 
-	err = rt.db.DeleteMessage(messageId, ctx.UserID)
+	err := rt.db.DeleteMessage(messageId, ctx.UserID)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to delete message")
 		http.Error(w, "Not found or forbidden", http.StatusForbidden)
@@ -179,14 +198,13 @@ func (rt *_router) deleteMessage(w http.ResponseWriter, r *http.Request, ps http
 
 // commentMessage reacts to a message
 func (rt *_router) commentMessage(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("messageId")
-	messageId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
+	messageId := ps.ByName("messageId")
+	if messageId == "" {
 		http.Error(w, "Invalid Message ID", http.StatusBadRequest)
 		return
 	}
@@ -218,19 +236,18 @@ func (rt *_router) commentMessage(w http.ResponseWriter, r *http.Request, ps htt
 
 // uncommentMessage removes a reaction
 func (rt *_router) uncommentMessage(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	idStr := ps.ByName("reactionId")
-	reactionId, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
+	reactionId := ps.ByName("reactionId")
+	if reactionId == "" {
 		http.Error(w, "Invalid Reaction ID", http.StatusBadRequest)
 		return
 	}
 
-	err = rt.db.UncommentMessage(reactionId, ctx.UserID)
+	err := rt.db.UncommentMessage(reactionId, ctx.UserID)
 	if err != nil {
 		ctx.Logger.WithError(err).Error("failed to uncomment")
 		http.Error(w, "Not found or forbidden", http.StatusForbidden)
@@ -238,30 +255,4 @@ func (rt *_router) uncommentMessage(w http.ResponseWriter, r *http.Request, ps h
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleMessageAction dispatches between forwardMessage and commentMessage
-func (rt *_router) handleMessageAction(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	action := ps.ByName("action") // starts with /
-
-	if action == "/forwarded" {
-		rt.forwardMessage(w, r, ps, ctx)
-		return
-	}
-
-	// Check for .../:messageId/reactions
-	// Format: /<messageId>/reactions
-	parts := strings.Split(strings.TrimPrefix(action, "/"), "/")
-	if len(parts) == 2 && parts[1] == "reactions" {
-		// Create new params with messageId
-		messageId := parts[0]
-		newParams := make(httprouter.Params, len(ps)+1)
-		copy(newParams, ps)
-		newParams[len(ps)] = httprouter.Param{Key: "messageId", Value: messageId}
-
-		rt.commentMessage(w, r, newParams, ctx)
-		return
-	}
-
-	http.Error(w, "Not Found", http.StatusNotFound)
 }

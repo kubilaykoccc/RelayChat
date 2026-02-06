@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/gofrs/uuid"
 )
 
 // SendMessage adds a new message to the database
@@ -12,21 +14,22 @@ func (db *appdbimpl) SendMessage(message Message) (Message, error) {
 	message.Received = false
 	message.Read = false
 
-	res, err := db.c.Exec("INSERT INTO messages (conversation_id, sender_id, content, type, timestamp, received, read, reply_to_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		message.ConversationID, message.SenderID, message.Content, message.Type, message.Timestamp, message.Received, message.Read, message.ReplyToID, message.Photo)
+	newMsgUUID, err := uuid.NewV4()
 	if err != nil {
 		return Message{}, err
 	}
-	id, err := res.LastInsertId()
+	message.ID = newMsgUUID.String()
+
+	_, err = db.c.Exec("INSERT INTO messages (id, conversation_id, sender_id, content, type, timestamp, received, read, reply_to_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		message.ID, message.ConversationID, message.SenderID, message.Content, message.Type, message.Timestamp, message.Received, message.Read, message.ReplyToID, message.Photo)
 	if err != nil {
 		return Message{}, err
 	}
-	message.ID = uint64(id)
 	return message, nil
 }
 
 // ForwardMessage creates a new message with content from another message
-func (db *appdbimpl) ForwardMessage(conversationId uint64, forwardedMessageId uint64, senderId uint64) (Message, error) {
+func (db *appdbimpl) ForwardMessage(conversationId string, forwardedMessageId string, senderId string) (Message, error) {
 	// Get original content
 	var content, msgType string
 	var photo []byte
@@ -50,7 +53,7 @@ func (db *appdbimpl) ForwardMessage(conversationId uint64, forwardedMessageId ui
 }
 
 // DeleteMessage deletes a message if the user is the sender
-func (db *appdbimpl) DeleteMessage(messageId uint64, userId uint64) error {
+func (db *appdbimpl) DeleteMessage(messageId string, userId string) error {
 	res, err := db.c.Exec("DELETE FROM messages WHERE id = ? AND sender_id = ?", messageId, userId)
 	if err != nil {
 		return err
@@ -77,21 +80,22 @@ func (db *appdbimpl) CommentMessage(reaction Reaction) (Reaction, error) {
 		return Reaction{}, errors.New("user already reacted to this message")
 	}
 
-	res, err := db.c.Exec("INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)",
-		reaction.MessageID, reaction.UserID, reaction.Emoji)
+	newReactionUUID, err := uuid.NewV4()
 	if err != nil {
 		return Reaction{}, err
 	}
-	id, err := res.LastInsertId()
+	reaction.ID = newReactionUUID.String()
+
+	_, err = db.c.Exec("INSERT INTO reactions (id, message_id, user_id, emoji) VALUES (?, ?, ?, ?)",
+		reaction.ID, reaction.MessageID, reaction.UserID, reaction.Emoji)
 	if err != nil {
 		return Reaction{}, err
 	}
-	reaction.ID = uint64(id)
 	return reaction, nil
 }
 
 // UncommentMessage removes a reaction
-func (db *appdbimpl) UncommentMessage(reactionId uint64, userId uint64) error {
+func (db *appdbimpl) UncommentMessage(reactionId string, userId string) error {
 	res, err := db.c.Exec("DELETE FROM reactions WHERE id = ? AND user_id = ?", reactionId, userId)
 	if err != nil {
 		return err

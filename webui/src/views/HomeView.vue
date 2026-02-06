@@ -24,7 +24,7 @@ function onSelectConversation(id) {
 async function onSelectUser(user) {
     // Create conversation (1-on-1)
     try {
-        const response = await axios.post('/conversations', {
+        const response = await axios.post('/start-conversation', {
             members: [user.id]
         })
         selectedConversationId.value = response.data.id
@@ -46,7 +46,7 @@ async function doCreateGroup() {
     if (!newGroupName.value) return
     showGroupModal.value = false
     try {
-        const response = await axios.post('/conversations', { name: newGroupName.value })
+        const response = await axios.post('/start-conversation', { name: newGroupName.value })
         selectedConversationId.value = response.data.id
         refreshList()
     } catch (e) {

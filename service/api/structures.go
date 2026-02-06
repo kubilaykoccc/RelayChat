@@ -1,6 +1,10 @@
 package api
 
-import "github.com/kubilaykoccc/Wasa/service/database"
+import (
+	"time"
+
+	"github.com/kubilaykoccc/Wasa/service/database"
+)
 
 // structures.go contains the Go structs for API requests and responses that differ from the DB models
 
@@ -11,12 +15,12 @@ type LoginRequest struct {
 
 // LoginResponse is the response for POST /session
 type LoginResponse struct {
-	Identifier uint64 `json:"identifier"`
+	Identifier string `json:"identifier"`
 }
 
 // UserResponse is the response for user endpoints (often aliases database.User but specific for API)
 type UserResponse struct {
-	ID       uint64 `json:"id"`
+	ID       string `json:"id"`
 	Username string `json:"username"`
 	Photo    []byte `json:"photo,omitempty"`
 }
@@ -31,7 +35,7 @@ func FromDatabaseUser(u database.User) UserResponse {
 
 // ConversationUnreadResponse for list view
 type ConversationUnreadResponse struct {
-	ID          uint64           `json:"id"`
+	ID          string           `json:"id"`
 	Name        string           `json:"name,omitempty"`
 	IsGroup     bool             `json:"isGroup"`
 	Photo       []byte           `json:"photo,omitempty"`
@@ -57,9 +61,9 @@ func FromDatabaseConversationUnread(c database.ConversationUnread) ConversationU
 
 // MessageResponse
 type MessageResponse struct {
-	ID             uint64             `json:"id"`
-	ConversationID uint64             `json:"conversationId"`
-	SenderID       uint64             `json:"senderId"`
+	ID             string             `json:"id"`
+	ConversationID string             `json:"conversationId"`
+	SenderID       string             `json:"senderId"`
 	Content        string             `json:"content"`
 	Type           string             `json:"type"`
 	Timestamp      string             `json:"timestamp"` // ISO8601 string
@@ -81,7 +85,7 @@ func FromDatabaseMessage(m database.Message) MessageResponse {
 		SenderID:       m.SenderID,
 		Content:        m.Content,
 		Type:           m.Type,
-		Timestamp:      m.Timestamp.Format("2006-01-02T15:04:05.999Z07:00"),
+		Timestamp:      m.Timestamp.Format(time.RFC3339),
 		Received:       m.Received,
 		Read:           m.Read,
 		Reactions:      reactions,
@@ -97,9 +101,9 @@ func FromDatabaseMessage(m database.Message) MessageResponse {
 
 // ReactionResponse
 type ReactionResponse struct {
-	ID        uint64 `json:"id"`
-	MessageID uint64 `json:"messageId"`
-	UserID    uint64 `json:"userId"`
+	ID        string `json:"id"`
+	MessageID string `json:"messageId"`
+	UserID    string `json:"userId"`
 	Emoji     string `json:"emoji"`
 }
 
@@ -127,12 +131,13 @@ type SendMessageRequest struct {
 	Type      string `json:"type"`
 	Content   string `json:"content,omitempty"`
 	Text      string `json:"text,omitempty"`
-	ReplyToID uint64 `json:"replyToId,omitempty"`
+	ReplyToID string `json:"replyToId,omitempty"`
 }
 
 // ForwardMessageRequest
 type ForwardMessageRequest struct {
-	ForwardedMessageID uint64 `json:"forwardedMessageId"`
+	ForwardedMessageID string `json:"forwardedMessageId"`
+	ConversationID     string `json:"conversationId"`
 }
 
 // CommentMessageRequest
@@ -143,5 +148,10 @@ type CommentMessageRequest struct {
 // CreateConversationRequest
 type CreateConversationRequest struct {
 	Name    string   `json:"name"`
-	Members []uint64 `json:"members"`
+	Members []string `json:"members"`
+}
+
+// AddMemberRequest
+type AddMemberRequest struct {
+	UserID string `json:"userId"`
 }

@@ -37,6 +37,7 @@ async function loadData(isInitial = false) {
         const response = await axios.get(`/conversations/${props.conversationId}`, { params: { _t: Date.now() } })
         
         const newMessages = response.data.messages
+        // Auto-scroll if new messages arrived
         if (newMessages.length > messages.value.length) {
             scrollToBottom()
         }
@@ -72,7 +73,7 @@ async function sendMessage() {
             payload = {
                 type: 'text',
                 content: newMessage.value,
-                replyToId: replyingTo.value ? replyingTo.value.id : 0
+                replyToId: replyingTo.value ? replyingTo.value.id : null
             }
         }
 
@@ -110,7 +111,7 @@ function clearReply() {
 async function deleteMessage(id) {
     if (!confirm("Delete this message?")) return
     try {
-        await axios.delete(`/conversations/${props.conversationId}/messages/${id}`)
+        await axios.delete(`/messages/${id}`)
         await loadData()
     } catch (e) {
         alert("Error deleting: " + e.toString())
@@ -122,7 +123,7 @@ const emit = defineEmits(['conversation-updated'])
 
 async function addMember(user) {
     try {
-        await axios.put(`/conversations/${props.conversationId}/members/${user.id}`)
+        await axios.post(`/groups/${props.conversationId}/members`, { userId: user.id })
         showAddMember.value = false
         alert(`Added ${user.username} to group!`)
         await loadData()
@@ -135,7 +136,7 @@ async function addMember(user) {
 async function leaveGroup() {
     if (!confirm("Are you sure you want to leave this group?")) return
     try {
-        await axios.delete(`/conversations/${props.conversationId}/members/me`)
+        await axios.post(`/groups/${props.conversationId}/leave`)
         window.location.reload()
     } catch (e) {
         alert("Error leaving group: " + e.toString())
@@ -146,7 +147,7 @@ async function updateGroupName() {
     const newName = prompt("Enter new group name:", conversation.value.name)
     if (!newName) return
     try {
-        await axios.put(`/conversations/${props.conversationId}/name`, { name: newName })
+        await axios.put(`/groups/${props.conversationId}/name`, { name: newName })
         await loadData()
         emit('conversation-updated')
     } catch (e) {
@@ -168,7 +169,7 @@ async function updateGroupPhoto(event) {
     }
 
     try {
-        await axios.put(`/conversations/${props.conversationId}/photo`, file, {
+        await axios.put(`/groups/${props.conversationId}/photo`, file, {
             headers: {
                 'Content-Type': file.type
             }
@@ -186,7 +187,7 @@ async function updateGroupPhoto(event) {
 // Reactions
 async function reactToMessage(msgId, emoji) {
     try {
-        await axios.post(`/conversations/${props.conversationId}/messages/${msgId}/reactions`, { emoji })
+        await axios.post(`/messages/${msgId}/reactions`, { emoji })
         await loadData()
     } catch (e) {
         alert("Error reacting: " + e.toString())
@@ -195,7 +196,7 @@ async function reactToMessage(msgId, emoji) {
 
 async function removeReaction(msgId, reactionId) {
     try {
-        await axios.delete(`/conversations/${props.conversationId}/messages/${msgId}/reactions/${reactionId}`)
+        await axios.delete(`/messages/${msgId}/reactions/${reactionId}`)
         await loadData()
     } catch (e) {
         alert("Error removing reaction: " + e.toString())
@@ -217,8 +218,8 @@ async function openForwardModal(msg) {
 async function forwardMessage(targetConvId) {
     if (!messageToForward.value) return
     try {
-        await axios.post(`/conversations/${targetConvId}/messages/forwarded`, {
-            forwardedMessageId: messageToForward.value.id
+        await axios.post(`/messages/${messageToForward.value.id}/forward`, {
+            conversationId: targetConvId
         })
         showForwardModal.value = false
         messageToForward.value = null
@@ -250,7 +251,7 @@ function stopPolling() {
     }
 }
 
-// Notify parent to refresh list
+// Refresh list in parent component to update unread counts/last message
 watch(conversation, () => {
    emit('conversation-updated')
 })

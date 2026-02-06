@@ -11,7 +11,7 @@ import (
 
 // setMyUserName updates the user's username
 func (rt *_router) setMyUserName(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -40,7 +40,7 @@ func (rt *_router) setMyUserName(w http.ResponseWriter, r *http.Request, ps http
 
 // setMyPhoto updates the user's photo
 func (rt *_router) setMyPhoto(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -63,7 +63,7 @@ func (rt *_router) setMyPhoto(w http.ResponseWriter, r *http.Request, ps httprou
 
 // searchUsers searches for users
 func (rt *_router) searchUsers(w http.ResponseWriter, r *http.Request, ps httprouter.Params, ctx reqcontext.RequestContext) {
-	if ctx.UserID == 0 {
+	if ctx.UserID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}

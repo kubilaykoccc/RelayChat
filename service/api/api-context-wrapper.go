@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gofrs/uuid"
 	"github.com/julienschmidt/httprouter"
@@ -40,10 +39,7 @@ func (rt *_router) wrap(fn httpRouterHandler) func(http.ResponseWriter, *http.Re
 			const prefix = "Bearer "
 			if len(authHeader) > len(prefix) && authHeader[:len(prefix)] == prefix {
 				tokenStr := authHeader[len(prefix):]
-				id, err := strconv.ParseUint(tokenStr, 10, 64)
-				if err == nil {
-					ctx.UserID = id
-				}
+				ctx.UserID = tokenStr
 			}
 		}
 
