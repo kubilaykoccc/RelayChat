@@ -1,33 +1,34 @@
-# WhatsApp Web Clone (WASA Project)
+# WASA Messaging Web Application
 
-This project is a simplified web messaging application developed for the **Web and Software Architecture (WASA)** course at Sapienza University of Rome.
+This project is a web messaging application developed for the **Web and Software Architecture (WASA)** course at **Sapienza University of Rome**.
 
-The goal of the project is to simulate the core functionalities of a messaging platform similar to WhatsApp, focusing on backend API architecture, frontend interaction, and client-server communication.
+The goal of the project is to simulate a simplified messaging platform similar to **WhatsApp**, focusing on backend API design, client-server communication, and modern web application architecture.
 
 ## Features
 
-- User registration and authentication
-- Create and manage conversations
+- User registration and profile management
+- Create and manage chat conversations
 - Send and receive messages
-- Real-time chat interface
-- REST API communication between frontend and backend
-- Modern web UI built with Vue.js
+- REST API communication
+- Web-based chat interface
 
 ## Tech Stack
 
-**Backend**
+### Backend
 - Go (Golang)
-- REST API architecture
-- Go modules & vendoring
+- RESTful API
+- Go Modules
 
-**Frontend**
+### Frontend
 - Vue.js
-- Bootstrap
 - JavaScript
+- Bootstrap UI
 
-**Tools**
+### Tools
 - Node.js
 - Yarn
 - Docker container for frontend development
 
-## Project Structure
+## Project Architecture
+
+The project follows a modular architecture separating backend services and frontend UI.
